@@ -8,6 +8,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from bs4 import BeautifulSoup
@@ -203,6 +204,73 @@ def save_cached_day(cache_dir: Path, day: LiturgicalDay) -> None:
     path.write_text(day.model_dump_json(indent=2), encoding="utf-8")
 
 
+_LITURGICAL_PREFIX_RE = re.compile(
+    r"^(optional memorial of|memorial of|feast of|solemnity of|commemoration of)\s+",
+    re.I,
+)
+_SAINT_ABBREV_RE = re.compile(r"\bSts?\.\s*", re.I)
+
+
+def clean_saint_query(celebration_title: str) -> str:
+    """Normalize a liturgical celebration title into a clean lookup query for a saint biography."""
+    cleaned = _LITURGICAL_PREFIX_RE.sub("", celebration_title.strip())
+    # Drop trailing liturgical descriptors like ", virgin and martyr" or ", bishop and doctor"
+    cleaned = cleaned.split(",")[0].strip()
+    cleaned = _SAINT_ABBREV_RE.sub("Saint ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _trim_sentences(text: str, max_sentences: int = 3, max_chars: int = 420) -> str:
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    out = " ".join(sentences[:max_sentences]).strip()
+    if len(out) > max_chars:
+        out = out[: max_chars - 1].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    return out
+
+
+def fetch_saint_biography(celebration_title: str, timeout: float = 6.0) -> str:
+    """Fetch a concise 2–3 sentence historical biography for a saint/feast via Wikipedia REST API."""
+    query = clean_saint_query(celebration_title)
+    if not query or any(
+        ferial in query.lower()
+        for ferial in ("monday of", "tuesday of", "wednesday of", "thursday of", "friday of", "saturday of", "sunday in")
+    ):
+        return ""
+
+    headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+    with httpx.Client(timeout=timeout, follow_redirects=True, headers=headers) as client:
+        # 1. Direct REST page summary
+        direct_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(query.replace(' ', '_'))}"
+        resp = client.get(direct_url)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("type") != "disambiguation" and data.get("extract"):
+                return _trim_sentences(str(data["extract"]))
+
+        # 2. Search fallback for saints whose Wikipedia title includes a suffix (e.g. "Agnes of Rome")
+        search_resp = client.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={
+                "action": "query",
+                "list": "search",
+                "srsearch": f"{query} Catholic saint",
+                "srlimit": 1,
+                "format": "json",
+            },
+        )
+        if search_resp.status_code == 200:
+            hits = search_resp.json().get("query", {}).get("search") or []
+            if hits:
+                title = str(hits[0].get("title", "")).strip()
+                if title:
+                    summary_resp = client.get(
+                        f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(title.replace(' ', '_'))}"
+                    )
+                    if summary_resp.status_code == 200 and summary_resp.json().get("extract"):
+                        return _trim_sentences(str(summary_resp.json()["extract"]))
+    return ""
+
+
 def fetch_calapi_day(target_date: dt.date, timeout: float = 10.0) -> tuple[str, str, SaintInfo | None]:
     """Fetch liturgical calendar metadata from CalAPI."""
     url = (
@@ -254,6 +322,14 @@ def get_liturgical_day(
         season, celebration_title, saint = fetch_calapi_day(resolved_date)
     except Exception as exc:  # noqa: BLE001
         logger.warning("CalAPI fetch failed for %s: %s", resolved_date, exc)
+
+    if saint is not None and saint.title:
+        try:
+            bio = fetch_saint_biography(saint.title)
+            if bio:
+                saint.summary = bio
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Saint biography enrichment skipped for %s: %s", saint.title, exc)
 
     try:
         usccb_title, readings = fetch_usccb_readings(resolved_date)
