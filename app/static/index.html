@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cor ad Cor — Catholic Daily Liturgical & Spiritual Companion</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="sanctuary-header">
+    <div class="header-inner">
+      <div class="brand-block">
+        <div class="brand-eyebrow">Catholic Liturgical &amp; Catechism Companion</div>
+        <h1 class="brand-title">Cor ad Cor <span class="brand-subtitle">Heart Speaks to Heart</span></h1>
+      </div>
+
+      <div class="controls-bar">
+        <label class="control-item" for="liturgy-date">
+          <span class="control-label">Liturgical Date</span>
+          <input type="date" id="liturgy-date" />
+        </label>
+
+        <label class="control-toggle" for="offline-toggle" title="Use offline sample fixture or fetch live USCCB/CalAPI">
+          <input type="checkbox" id="offline-toggle" />
+          <span>Offline Sample</span>
+        </label>
+
+        <div class="engine-pill" id="engine-status" title="LLM Router Status">
+          Checking engine...
+        </div>
+
+        <button type="button" class="btn-ghost" id="theme-toggle" aria-label="Toggle evening mode">
+          Evening Vigil
+        </button>
+      </div>
+    </div>
+
+    <div class="liturgy-banner" id="liturgy-banner">
+      <div class="liturgy-banner-inner">
+        <span class="liturgy-dot" id="liturgy-color-dot" data-colour="white"></span>
+        <span class="liturgy-season" id="liturgy-season">Ordinary Time</span>
+        <span class="liturgy-divider">&bull;</span>
+        <strong class="liturgy-celebration" id="liturgy-celebration">Loading today's liturgy...</strong>
+        <span class="liturgy-source-tag" id="liturgy-source-tag"></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="sanctuary-grid">
+    <!-- LEFT COLUMN: Sacred Sources (Lectionary, Saint, Catechism) -->
+    <section class="sources-column" aria-label="Liturgical and Catechism Sources">
+      <div class="panel-card">
+        <div class="panel-header">
+          <div>
+            <span class="panel-eyebrow">Lectionary</span>
+            <h2 class="panel-title">Today's Mass Readings</h2>
+          </div>
+          <span class="panel-hint">Click any citation pill to jump here</span>
+        </div>
+        <div id="readings-list" class="readings-list">
+          <p class="muted-placeholder">Loading readings...</p>
+        </div>
+      </div>
+
+      <div class="panel-card" id="source-saint">
+        <div class="panel-header">
+          <div>
+            <span class="panel-eyebrow">Communion of Saints</span>
+            <h2 class="panel-title">Saint &amp; Feast of the Day</h2>
+          </div>
+        </div>
+        <div id="saint-body" class="saint-body">
+          <p class="muted-placeholder">Loading saint information...</p>
+        </div>
+      </div>
+
+      <div class="panel-card" id="source-ccc">
+        <div class="panel-header">
+          <div>
+            <span class="panel-eyebrow">Magisterial Anchor (FAISS RAG)</span>
+            <h2 class="panel-title">Catechism of the Catholic Church</h2>
+          </div>
+        </div>
+
+        <form id="ccc-search-form" class="ccc-search-bar">
+          <input
+            type="search"
+            id="ccc-search-input"
+            placeholder="Search Catechism themes (e.g., dryness, mercy, Eucharist)..."
+            aria-label="Search Catechism"
+          />
+          <button type="submit" class="btn-secondary">Search CCC</button>
+        </form>
+
+        <div id="ccc-list" class="ccc-list">
+          <p class="muted-placeholder">Loading matched Catechism paragraphs...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT COLUMN: The Spiritual Companion -->
+    <section class="companion-column" aria-label="Spiritual Companion">
+      <div class="panel-card companion-shell">
+        <div class="mode-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            id="tab-daily"
+            class="mode-tab active"
+            aria-selected="true"
+            aria-controls="panel-daily"
+          >
+            1. 5 Minutes Before Mass
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-checkin"
+            class="mode-tab"
+            aria-selected="false"
+            aria-controls="panel-checkin"
+          >
+            2. Bring Your Day to Mass
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-examen"
+            class="mode-tab"
+            aria-selected="false"
+            aria-controls="panel-examen"
+          >
+            3. Evening Examen
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-confession"
+            class="mode-tab"
+            aria-selected="false"
+            aria-controls="panel-confession"
+          >
+            4. Confession &amp; Continuity
+          </button>
+        </div>
+
+        <!-- TAB 1: Daily Pre-Mass Briefing -->
+        <div id="panel-daily" role="tabpanel" aria-labelledby="tab-daily" class="tab-panel">
+          <div class="companion-intro">
+            <div>
+              <h2 class="companion-heading">Plain-Language Mass Prep &amp; Hidden Thread</h2>
+              <p class="companion-subtext">
+                Understand the historical backstory, why the Church paired today's readings together,
+                and how today's Saint and Catechism paragraphs speak to ordinary life.
+              </p>
+            </div>
+            <div class="action-row">
+              <button type="button" id="btn-generate-daily" class="btn-primary">
+                Reflect on Today's Readings
+              </button>
+              <button
+                type="button"
+                id="btn-preview-daily"
+                class="btn-secondary"
+                title="Generate a citation-grounded preview without calling an external LLM API"
+              >
+                Instant Preview
+              </button>
+            </div>
+          </div>
+
+          <div class="telemetry-bar" id="daily-telemetry" hidden>
+            <span class="provider-badge" id="daily-provider-pill"></span>
+            <div class="audio-controls">
+              <button type="button" class="btn-audio" data-audio-target="daily" data-audio-action="speak">
+                Listen (Calm Voice)
+              </button>
+              <button type="button" class="btn-audio" data-audio-target="daily" data-audio-action="mp3">
+                Download MP3
+              </button>
+            </div>
+          </div>
+          <audio id="daily-audio-player" class="voice-audio-player" controls hidden></audio>
+
+          <article id="daily-reflection-body" class="reflection-prose">
+            <div class="empty-sanctuary-state">
+              <p>
+                Today's readings and Catechism anchors are loaded on the left.
+                Click <strong>Reflect on Today's Readings</strong> (uses your Groq/Gemini router)
+                or <strong>Instant Preview</strong> to read today's reflection.
+              </p>
+            </div>
+          </article>
+        </div>
+
+        <!-- TAB 2: Two-Way Personal Check-In -->
+        <div id="panel-checkin" role="tabpanel" aria-labelledby="tab-checkin" class="tab-panel" hidden>
+          <div class="companion-intro">
+            <h2 class="companion-heading">What Are You Carrying Into Prayer Today?</h2>
+            <p class="companion-subtext">
+              Share one honest sentence about where you are today. The companion will sit with what you share
+              and gently connect it to today's Mass readings and Catechism—without lecturing or rushing to fix it.
+            </p>
+          </div>
+
+          <div class="starter-chips" aria-label="Sample check-in prompts">
+            <button type="button" class="chip-btn" data-prompt="I feel burned out and resentful at work, and it's hard to be patient.">
+              Burned out &amp; resentful at work
+            </button>
+            <button type="button" class="chip-btn" data-prompt="My prayer feels dry and distant lately, like I'm just going through the motions.">
+              Dry &amp; distant in prayer
+            </button>
+            <button type="button" class="chip-btn" data-prompt="I'm anxious about a difficult family decision and don't know what God wants.">
+              Anxious about a decision
+            </button>
+            <button type="button" class="chip-btn" data-prompt="I'm carrying recurring guilt that I haven't had the courage to bring to Confession yet.">
+              Carrying guilt before Confession
+            </button>
+          </div>
+
+          <form id="checkin-form" class="checkin-form">
+            <textarea
+              id="checkin-input"
+              rows="3"
+              maxlength="2000"
+              placeholder="Write honestly in your own words (e.g., 'I'm exhausted today and struggling to trust God with...')"
+              required
+            ></textarea>
+            <div class="action-row">
+              <button type="submit" id="btn-submit-checkin" class="btn-primary">
+                Bring This to Today's Word
+              </button>
+              <button type="button" id="btn-preview-checkin" class="btn-secondary">
+                Preview Sample Response
+              </button>
+              <label class="control-toggle" for="checkin-remember" title="Store locally on this device to track themes across the liturgical season">
+                <input type="checkbox" id="checkin-remember" checked />
+                <span>Save to Private Season Memory</span>
+              </label>
+            </div>
+          </form>
+
+          <div class="telemetry-bar" id="checkin-telemetry" hidden>
+            <span class="provider-badge" id="checkin-provider-pill"></span>
+            <div class="audio-controls">
+              <button type="button" class="btn-audio" data-audio-target="checkin" data-audio-action="speak">
+                Listen (Calm Voice)
+              </button>
+              <button type="button" class="btn-audio" data-audio-target="checkin" data-audio-action="mp3">
+                Download MP3
+              </button>
+            </div>
+          </div>
+          <audio id="checkin-audio-player" class="voice-audio-player" controls hidden></audio>
+
+          <article id="checkin-reflection-body" class="reflection-prose"></article>
+        </div>
+
+        <!-- TAB 3: 3-Minute Nightly Ignatian Examen -->
+        <div id="panel-examen" role="tabpanel" aria-labelledby="tab-examen" class="tab-panel" hidden>
+          <div class="companion-intro">
+            <h2 class="companion-heading">3-Minute Nightly Ignatian Examen</h2>
+            <p class="companion-subtext">
+              Review the day in God's presence before rest—noticing where grace showed up, where you felt close
+              to Christ, and where you pulled away, mirrored back through today's Mass readings.
+            </p>
+          </div>
+
+          <form id="examen-form" class="examen-form">
+            <label class="examen-field">
+              <span class="examen-label">1. Gratitude — What is one thing (small or large) you are thankful for today?</span>
+              <input
+                type="text"
+                id="examen-gratitude"
+                maxlength="1500"
+                placeholder="e.g., A quiet cup of coffee, a kind conversation, making it through a long afternoon..."
+              />
+            </label>
+
+            <label class="examen-field">
+              <span class="examen-label">2. Consolation — Where did God feel close, or where did you respond with patience and love?</span>
+              <input
+                type="text"
+                id="examen-consolation"
+                maxlength="1500"
+                placeholder="e.g., Pausing to listen to a coworker instead of rushing..."
+              />
+            </label>
+
+            <label class="examen-field">
+              <span class="examen-label">3. Desolation / Resistance — Where did you feel drained, reactive, or pull away from grace?</span>
+              <input
+                type="text"
+                id="examen-desolation"
+                maxlength="1500"
+                placeholder="e.g., Snapping in frustration at home and scrolling to numb out..."
+              />
+            </label>
+
+            <div class="action-row">
+              <button type="submit" id="btn-submit-examen" class="btn-primary">
+                Pray Evening Examen
+              </button>
+              <button type="button" id="btn-preview-examen" class="btn-secondary">
+                Instant Preview
+              </button>
+              <label class="control-toggle" for="examen-remember">
+                <input type="checkbox" id="examen-remember" checked />
+                <span>Save to Private Season Memory</span>
+              </label>
+            </div>
+          </form>
+
+          <div class="telemetry-bar" id="examen-telemetry" hidden>
+            <span class="provider-badge" id="examen-provider-pill"></span>
+            <div class="audio-controls">
+              <button type="button" class="btn-audio" data-audio-target="examen" data-audio-action="speak">
+                Listen (Calm Voice)
+              </button>
+              <button type="button" class="btn-audio" data-audio-target="examen" data-audio-action="mp3">
+                Download MP3
+              </button>
+            </div>
+          </div>
+          <audio id="examen-audio-player" class="voice-audio-player" controls hidden></audio>
+
+          <article id="examen-reflection-body" class="reflection-prose"></article>
+        </div>
+
+        <!-- TAB 4: Season Continuity & Gentle Confession Prep -->
+        <div id="panel-confession" role="tabpanel" aria-labelledby="tab-confession" class="tab-panel" hidden>
+          <div class="companion-intro">
+            <h2 class="companion-heading">Season Continuity &amp; Gentle Confession Prep</h2>
+            <p class="companion-subtext">
+              View recurring spiritual patterns from your local opt-in reflections across this liturgical season,
+              and prepare a non-scrupulous Examination of Conscience before meeting a priest in Confession.
+            </p>
+          </div>
+
+          <div class="memory-dashboard" id="memory-dashboard">
+            <div class="memory-header">
+              <div>
+                <span class="panel-eyebrow">Local Opt-In Journal</span>
+                <h3 class="memory-title" id="memory-summary-title">Season Memory (0 saved reflections)</h3>
+              </div>
+              <button type="button" id="btn-clear-memory" class="btn-ghost" title="Delete all stored local reflections (e.g., after Confession)">
+                Wipe Memory (Clean Slate)
+              </button>
+            </div>
+            <div id="memory-themes-bar" class="memory-themes-bar">
+              <span class="muted-placeholder">No recurring themes recorded yet.</span>
+            </div>
+            <div id="memory-entries-list" class="memory-entries-list"></div>
+          </div>
+
+          <form id="confession-form" class="checkin-form">
+            <label class="examen-field">
+              <span class="examen-label">Optional: Specific burden, habit, or question to examine before Confession</span>
+              <textarea
+                id="confession-focus"
+                rows="2"
+                maxlength="1500"
+                placeholder="e.g., 'Help me distinguish work burnout from real impatience with my family, and prepare for Confession this Saturday.'"
+              ></textarea>
+            </label>
+            <div class="action-row">
+              <button type="submit" id="btn-submit-confession" class="btn-primary">
+                Prepare Examination of Conscience
+              </button>
+              <button type="button" id="btn-preview-confession" class="btn-secondary">
+                Instant Preview
+              </button>
+            </div>
+          </form>
+
+          <div class="telemetry-bar" id="confession-telemetry" hidden>
+            <span class="provider-badge" id="confession-provider-pill"></span>
+            <span class="citation-tip">Grounded in CCC &sect;1422–1441 &amp; &sect;1776 (Sacrament of Penance)</span>
+          </div>
+
+          <article id="confession-reflection-body" class="reflection-prose"></article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="sanctuary-footer">
+    <p>
+      <strong>Pastoral Boundary:</strong> <em>Cor ad Cor</em> is a reflective spiritual companion grounded in Sacred Scripture
+      and the Catechism of the Catholic Church. It is not a substitute for professional mental health counseling,
+      spiritual direction, or the Sacrament of Penance and Reconciliation with a Catholic priest.
+    </p>
+  </footer>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
