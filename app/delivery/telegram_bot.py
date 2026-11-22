@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from app.data_sources.prayers import list_prayers
 from app.data_sources.rosary import get_rosary_for_date
 from app.delivery.audio import VoiceNoteSynthesizer
 from app.services.companion import CompanionService
@@ -25,6 +26,7 @@ WELCOME_MESSAGE = (
     "• /examen gratitude | consolation | desolation — 3-Minute Evening Ignatian Examen\n"
     "• /confession [optional focus] — Gentle Examination of Conscience & Confession prep\n"
     "• /rosary — Today's 5 Rosary Mysteries with Fruits & CCC anchors\n"
+    "• /prayer [morning|evening|trust|confession|eucharist] — Classic Catholic prayers\n"
     "• /ccc <topic> — Search the Catechism of the Catholic Church\n"
     "• /wipe — Clear your saved local season memory (Clean Slate)\n\n"
     "Or simply send any honest sentence about what you're carrying today to bring it alongside today's Mass readings.\n\n"
@@ -180,6 +182,15 @@ class TelegramCompanionBot:
                     f"   {m.intention}"
                 )
             return BotAction(chat_id=chat_id, text="\n".join(lines))
+
+        if lower.startswith("/prayer"):
+            moment = raw_text[len("/prayer") :].strip() or None
+            prayers = list_prayers(moment=moment)
+            chosen = prayers[0]
+            return BotAction(
+                chat_id=chat_id,
+                text=f"{chosen.title} ({chosen.attribution})\n\n{chosen.text}",
+            )
 
         if lower.startswith("/ccc"):
             query = raw_text[len("/ccc") :].strip()

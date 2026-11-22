@@ -167,3 +167,8 @@ def test_exact_ccc_endpoint_multiturn_checkin_and_rhythm_stats(tmp_path: Path) -
         assert mem.status_code == 200
         assert mem.json()["distinct_days"] == 1
         assert mem.json()["last_entry_date"] == "2026-11-22"
+
+        prayers = client.get("/api/v1/prayers", params={"moment": "trust"})
+        assert prayers.status_code == 200
+        titles = [p["title"] for p in prayers.json()["prayers"]]
+        assert any("Suscipe" in t for t in titles)

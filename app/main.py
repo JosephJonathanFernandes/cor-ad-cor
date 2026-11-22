@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
+from app.data_sources.prayers import list_prayers
 from app.data_sources.rosary import get_rosary_for_date
 from app.delivery.audio import (
     VoiceNoteSynthesizer,
@@ -203,6 +204,14 @@ def create_app(
     @application.get("/api/v1/rosary")
     def get_daily_rosary(date: dt.date | None = Query(default=None)) -> dict[str, Any]:
         return get_rosary_for_date(date).to_dict()
+
+    @application.get("/api/v1/prayers")
+    def get_prayers(moment: str | None = Query(default=None)) -> dict[str, Any]:
+        prayers = list_prayers(moment=moment)
+        return {
+            "moment": moment or "all",
+            "prayers": [p.to_dict() for p in prayers],
+        }
 
     @application.get("/api/v1/daily")
     def get_daily_briefing(

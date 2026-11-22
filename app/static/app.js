@@ -37,6 +37,7 @@ const els = {
   rosaryWeekdayEyebrow: document.getElementById("rosary-weekday-eyebrow"),
   rosarySetTitle: document.getElementById("rosary-set-title"),
   rosaryList: document.getElementById("rosary-list"),
+  prayersList: document.getElementById("prayers-list"),
   cccSearchForm: document.getElementById("ccc-search-form"),
   cccSearchInput: document.getElementById("ccc-search-input"),
   tabDaily: document.getElementById("tab-daily"),
@@ -997,6 +998,35 @@ async function handleAudioClick(event) {
   }
 }
 
+async function loadPrayers() {
+  if (!els.prayersList) return;
+  try {
+    const res = await fetch("/api/v1/prayers");
+    if (!res.ok) return;
+    const data = await res.json();
+    els.prayersList.innerHTML = (data.prayers || [])
+      .map(
+        (p) => `
+        <details class="reading-item">
+          <summary>
+            <span>${escapeHtml(p.title)}</span>
+            <span class="reading-citation">${escapeHtml(p.moment)}</span>
+          </summary>
+          <div class="reading-text">
+            <div style="font-family:var(--font-sans); font-size:0.78rem; color:var(--text-muted); margin-bottom:0.4rem;">
+              ${escapeHtml(p.attribution)}
+            </div>
+            ${escapeHtml(p.text)}
+          </div>
+        </details>
+      `
+      )
+      .join("");
+  } catch {
+    // Non-blocking
+  }
+}
+
 async function init() {
   bindEvents();
   renderTimer();
@@ -1006,6 +1036,7 @@ async function init() {
   await checkEngineHealth();
   await loadLiturgyContext();
   await loadSeasonMemory();
+  await loadPrayers();
 }
 
 init();
