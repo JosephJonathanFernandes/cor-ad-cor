@@ -16,10 +16,12 @@ from app.prompts.companion import (
     build_confession_prep_prompt,
     build_daily_briefing_prompt,
     build_examen_prompt,
+    build_lectio_divina_prompt,
     build_preview_checkin_reflection,
     build_preview_confession_prep_reflection,
     build_preview_daily_reflection,
     build_preview_examen_reflection,
+    build_preview_lectio_divina,
     detect_distress_signal,
 )
 from app.rag.catechism import CatechismHit, CatechismIndex, build_embeddings
@@ -416,6 +418,52 @@ class CompanionService:
         """Return aggregated season continuity themes and recent opt-in entries."""
         return self.journal.season_summary(season=season)
 
+    def export_memory_entries(self, limit: int = 500):
+        """Return all saved journal entries for user-owned JSON export."""
+        return self.journal.list_entries(limit=limit)
+
     def clear_memory(self) -> int:
         """Delete all saved local reflection entries."""
         return self.journal.clear_all()
+
+    def lectio_divina(
+        self,
+        *,
+        selected_phrase: str = "",
+        target_date: dt.date | None = None,
+        offline: bool = False,
+        demo: bool = False,
+    ) -> CompanionReply:
+        """Guide a 4-step Catholic Lectio Divina anchored to today's Gospel."""
+        day = self.get_day(target_date, offline=offline)
+        query = f"contemplative prayer word of god meditation {selected_phrase}\n{day.theme_query()}"
+        ccc_hits = self.ccc_index.search(query, k=3)
+        # Ensure CCC §2709 (Contemplative Prayer) is available when present in the corpus
+        contemplative = self.ccc_index.get_by_paragraph(2709)
+        if contemplative is not None and all(h.paragraph != 2709 for h in ccc_hits):
+            ccc_hits = [contemplative, *ccc_hits[:2]]
+
+        if demo:
+            return self._finalize_reply(
+                liturgy=day,
+                ccc_hits=ccc_hits,
+                reflection=build_preview_lectio_divina(
+                    day=day,
+                    ccc_hits=ccc_hits,
+                    selected_phrase=selected_phrase,
+                ),
+                llm=_preview_llm_result(),
+            )
+
+        prompt = build_lectio_divina_prompt(
+            day=day,
+            ccc_hits=ccc_hits,
+            selected_phrase=selected_phrase,
+        )
+        result = self.router.generate(COMPANION_SYSTEM_PROMPT, prompt, temperature=0.4)
+        return self._finalize_reply(
+            liturgy=day,
+            ccc_hits=ccc_hits,
+            reflection=result.content,
+            llm=result,
+        )

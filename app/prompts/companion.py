@@ -345,3 +345,77 @@ Drawing on what you shared and your recent season reflections, sit quietly with 
 *(Note: This tool helps you prepare your heart; sacramental forgiveness is received in person from a Catholic priest in the Sacrament of Reconciliation. Once you go to Confession, you can click **"Wipe Memory (Clean Slate)"** above to clear your saved notes.)*"""
 
 
+def build_lectio_divina_prompt(
+    *,
+    day: LiturgicalDay,
+    ccc_hits: list[CatechismHit],
+    selected_phrase: str = "",
+) -> str:
+    """Build a 4-step monastic Lectio Divina prompt anchored to today's Gospel."""
+    phrase_line = (
+        f'The user was especially drawn to this phrase: "{selected_phrase.strip()}"'
+        if selected_phrase.strip()
+        else "The user has not picked a specific phrase yet—choose one vivid, short phrase from today's Gospel to linger on."
+    )
+    return f"""Guide the user through a calm, unhurried 4-step Catholic Lectio Divina anchored in today's Gospel and Catechism.
+
+=== USER FOCUS ===
+{phrase_line}
+
+=== TODAY'S LITURGICAL CONTEXT ===
+{_format_liturgy_context(day)}
+
+=== RETRIEVED CATECHISM PARAGRAPHS ===
+{_format_ccc_context(ccc_hits)}
+
+Write the guided prayer using these exact markdown headings:
+
+### 1. Lectio (Reading — Hearing the Word Slowly)
+Introduce today's [Gospel] scene gently in 2–3 plain sentences and quote one short focal phrase to read slowly twice.
+
+### 2. Meditatio (Meditation — Sitting With the Phrase)
+Invite the reader to notice what stirs inside them around that phrase—curiosity, comfort, or quiet resistance—and connect 1 retrieved [CCC §N] paragraph in warm, everyday language.
+
+### 3. Oratio (Prayer — Speaking Honestly to God)
+Offer a brief, honest 2–3 sentence prayer response (without religious clichés) and one open prompt for what they might say to Christ in their own words.
+
+### 4. Contemplatio (Contemplation — Resting in Stillness)
+Invite the reader to set down words and rest in silent presence before God (citing [CCC §2709] if present in context, otherwise referencing quiet attentive prayer) for 1–5 minutes using the stillness timer."""
+
+
+def build_preview_lectio_divina(
+    *,
+    day: LiturgicalDay,
+    ccc_hits: list[CatechismHit],
+    selected_phrase: str = "",
+) -> str:
+    """Deterministic, citation-grounded preview for guided Lectio Divina."""
+    gospel = next(
+        (r for r in day.readings if "gospel" in r.label.lower()),
+        day.readings[0] if day.readings else None,
+    )
+    gospel_ref = f"[{gospel.label}] ({gospel.citation})" if gospel else "[Gospel]"
+    ccc_primary = ccc_hits[0] if ccc_hits else None
+    ccc_ref = f"[{ccc_primary.citation}]" if ccc_primary else "[CCC §2709]"
+    phrase = selected_phrase.strip() or "Here are my mother and my brothers."
+
+    return f"""### 1. Lectio (Reading — Hearing the Word Slowly)
+Pause for one unhurried breath before today's {gospel_ref}. Read this short phrase twice, slowly, as if hearing it for the first time:
+> *"{phrase}"*
+
+Notice the tone of Jesus' voice here—not hurried, not distant, but turning directly toward the people right in front of him.
+
+### 2. Meditatio (Meditation — Sitting With the Phrase)
+Stay with that single line without rushing to analyze it. Notice whether it brings relief, longing, or a quiet ache of feeling on the outside. The Catechism frames this attentive listening in {ccc_ref} (*{ccc_primary.section if ccc_primary else "Contemplative Prayer"}*):
+> {ccc_primary.text if ccc_primary else "Contemplative prayer is a gaze of faith fixed on Jesus, an attentiveness to the Word of God, a silent love."}
+
+### 3. Oratio (Prayer — Speaking Honestly to God)
+Let whatever surfaced in your heart become a simple, unfiltered sentence to Christ:
+- *Prompt:* Tell Jesus honestly what feels hardest to trust him with right now.
+- *Prayer:* *Lord Jesus, I don't have polished words today. Meet me where I actually am, and let your Word settle deeper than my worries. Amen.*
+
+### 4. Contemplatio (Contemplation — Resting in Stillness)
+Now set down even your thoughts and questions. Start the **Quiet Contemplation Timer** below (1, 3, or 5 minutes) and simply rest in God's presence, knowing he looks at you with love."""
+
+
+
