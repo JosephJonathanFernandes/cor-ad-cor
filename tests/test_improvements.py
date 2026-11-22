@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.data_sources.liturgy import clean_saint_query
+from app.data_sources.liturgy import clean_saint_query, parse_vatican_news_html
 from app.llm.router import GroqGeminiRouter
 from app.main import create_app
 from app.rag.catechism import CatechismIndex, LocalDeterministicEmbeddings
@@ -19,6 +19,42 @@ def test_clean_saint_query() -> None:
     assert clean_saint_query("Memorial of St. Agnes, virgin and martyr") == "Saint Agnes"
     assert clean_saint_query("Optional Memorial of St. Thomas Aquinas, priest and doctor") == "Saint Thomas Aquinas"
     assert clean_saint_query("Feast of the Presentation of the Lord") == "the Presentation of the Lord"
+
+
+def test_parse_vatican_news_html() -> None:
+    html = """
+    <html><body>
+      <section class="section--evidence">
+        <h2>Reading of the day</h2>
+        <div class="section__content">
+          <p>A reading from the Book of Ezekiel</p>
+          <p>34:11-12, 15-17</p>
+          <p>Thus says the Lord GOD: I myself will look after and tend my sheep.</p>
+        </div>
+      </section>
+      <section class="section--evidence">
+        <h2>Gospel of the day</h2>
+        <div class="section__content">
+          <p>From the Gospel according to Matthew</p>
+          <p>25:31-46</p>
+          <p>Jesus said to his disciples: When the Son of Man comes in his glory.</p>
+        </div>
+      </section>
+      <section class="section--evidence">
+        <h2>The words of the Popes</h2>
+        <div class="section__content">
+          <p>The criterion of judgment is concrete charity to our neighbour.</p>
+        </div>
+      </section>
+    </body></html>
+    """
+    readings, papal = parse_vatican_news_html(html)
+    assert len(readings) == 2
+    assert readings[0].label == "First Reading"
+    assert "34:11-12" in readings[0].citation
+    assert readings[1].label == "Gospel"
+    assert "Matthew" in readings[1].citation
+    assert "concrete charity" in papal
 
 
 def test_exact_ccc_lookup_and_citation_verifier_hydration(tmp_path: Path) -> None:

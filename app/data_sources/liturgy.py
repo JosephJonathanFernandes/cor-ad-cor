@@ -45,6 +45,7 @@ class LiturgicalDay(BaseModel):
     colour: str = ""
     readings: list[Reading] = Field(default_factory=list)
     saint: SaintInfo | None = None
+    papal_reflection: str = ""
     source: str = "live"
 
     def theme_query(self) -> str:
@@ -283,6 +284,81 @@ def fetch_calapi_day(target_date: dt.date, timeout: float = 10.0) -> tuple[str, 
         return parse_calapi_payload(resp.json())
 
 
+def parse_vatican_news_html(html: str) -> tuple[list[Reading], str]:
+    """Extract official daily Mass readings and 'The words of the Popes' from Vatican News HTML."""
+    soup = BeautifulSoup(html, "html.parser")
+    readings: list[Reading] = []
+    papal_reflection = ""
+
+    for sec in soup.select("section.section--evidence"):
+        head = sec.select_one("h2")
+        content = sec.select_one(".section__content")
+        if not head or not content:
+            continue
+        heading = head.get_text(" ", strip=True).lower()
+        paragraphs = [
+            p.get_text(" ", strip=True)
+            for p in content.select("p")
+            if p.get_text(strip=True)
+        ]
+        if not paragraphs:
+            raw_lines = [line.strip() for line in content.get_text("\n", strip=True).splitlines() if line.strip()]
+            paragraphs = raw_lines
+        if not paragraphs:
+            continue
+
+        if "popes" in heading:
+            papal_reflection = "\n\n".join(paragraphs)
+            continue
+
+        if "reading of the day" in heading or "gospel of the day" in heading:
+            label = "Gospel" if "gospel" in heading else "First Reading"
+            # First paragraph(s) on Vatican News hold the intro + verse citation (e.g. "From the Gospel... 25:31-46")
+            first_line = paragraphs[0]
+            if len(paragraphs) >= 3 and re.search(r"\d+:\d+", paragraphs[1]):
+                citation = f"{first_line} {paragraphs[1]}".strip()
+                body = "\n\n".join(paragraphs[2:]).strip()
+            elif len(paragraphs) >= 2:
+                citation = first_line
+                body = "\n\n".join(paragraphs[1:]).strip()
+            else:
+                citation = ""
+                body = first_line
+            if body:
+                readings.append(Reading(label=label, citation=citation, text=body))
+
+    return readings, papal_reflection
+
+
+def fetch_vatican_news_readings(target_date: dt.date, timeout: float = 12.0) -> tuple[list[Reading], str]:
+    """Fetch official daily Mass readings & Papal reflection from Vatican News Word of the Day."""
+    url = (
+        f"https://www.vaticannews.va/en/word-of-the-day/"
+        f"{target_date.year}/{target_date.month:02d}/{target_date.day:02d}.html"
+    )
+    with httpx.Client(
+        timeout=timeout,
+        follow_redirects=True,
+        headers={"User-Agent": _USER_AGENT},
+    ) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        return parse_vatican_news_html(resp.text)
+
+
+def fetch_lectionary_citations(target_date: dt.date, timeout: float = 10.0) -> dict[str, str]:
+    """Fetch official daily lectionary citations (First Reading, Psalm, Second Reading, Gospel)."""
+    url = (
+        f"https://cpbjr.github.io/catholic-readings-api/readings/"
+        f"{target_date.year}/{target_date.month:02d}-{target_date.day:02d}.json"
+    )
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        data = resp.json()
+        return dict(data.get("readings") or {})
+
+
 def fetch_usccb_readings(target_date: dt.date, timeout: float = 12.0) -> tuple[str, list[Reading]]:
     """Fetch and parse daily Mass readings from USCCB."""
     slug = target_date.strftime("%m%d%y")
@@ -364,6 +440,7 @@ def get_liturgical_day(
     celebration_title = ""
     saint: SaintInfo | None = None
     readings: list[Reading] = []
+    papal_reflection = ""
 
     try:
         season, celebration_title, saint = fetch_calapi_day(resolved_date)
@@ -378,12 +455,47 @@ def get_liturgical_day(
         except Exception as exc:  # noqa: BLE001
             logger.debug("Saint biography enrichment skipped for %s: %s", saint.title, exc)
 
+    # Primary live source: Official Vatican News Word of the Day (open, reliable, includes Papal commentary)
     try:
-        usccb_title, readings = fetch_usccb_readings(resolved_date)
-        if usccb_title and not celebration_title:
-            celebration_title = usccb_title
+        readings, papal_reflection = fetch_vatican_news_readings(resolved_date)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("USCCB fetch failed for %s: %s", resolved_date, exc)
+        logger.warning("Vatican News fetch failed for %s: %s", resolved_date, exc)
+
+    # Enrich with Psalm / Second Reading citations from catholic-readings-api if present
+    if readings:
+        try:
+            cites = fetch_lectionary_citations(resolved_date)
+            existing_labels = {r.label.lower() for r in readings}
+            if cites.get("psalm") and "responsorial psalm" not in existing_labels:
+                readings.insert(
+                    1,
+                    Reading(
+                        label="Responsorial Psalm",
+                        citation=cites["psalm"],
+                        text=f"Lectionary citation for today's Responsorial Psalm: {cites['psalm']}.",
+                    ),
+                )
+            if cites.get("secondReading") and "second reading" not in existing_labels:
+                insert_idx = max(len(readings) - 1, 1)
+                readings.insert(
+                    insert_idx,
+                    Reading(
+                        label="Second Reading",
+                        citation=cites["secondReading"],
+                        text=f"Lectionary citation for today's Second Reading: {cites['secondReading']}.",
+                    ),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Lectionary citation enrichment skipped for %s: %s", resolved_date, exc)
+
+    # Secondary fallback: USCCB HTML
+    if not readings:
+        try:
+            usccb_title, readings = fetch_usccb_readings(resolved_date)
+            if usccb_title and not celebration_title:
+                celebration_title = usccb_title
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("USCCB fetch failed for %s: %s", resolved_date, exc)
 
     if not readings:
         try:
@@ -410,6 +522,7 @@ def get_liturgical_day(
         colour=saint.colour if saint else "",
         readings=readings,
         saint=saint,
+        papal_reflection=papal_reflection,
         source="live",
     )
     save_cached_day(cache_dir, day)

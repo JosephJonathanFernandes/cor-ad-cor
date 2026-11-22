@@ -58,6 +58,8 @@ def _format_liturgy_context(day: LiturgicalDay) -> str:
         )
     for reading in day.readings:
         lines.append(f"\n[{reading.label}] ({reading.citation})\n{reading.text}")
+    if day.papal_reflection:
+        lines.append(f"\n[Words of the Popes]\n{day.papal_reflection}")
     return "\n".join(lines)
 
 
