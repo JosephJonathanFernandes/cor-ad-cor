@@ -1,0 +1,17 @@
+{
+  "name": "Cor ad Cor — Catholic Daily Companion",
+  "short_name": "Cor ad Cor",
+  "description": "Grounded Catholic daily Mass readings, Saint of the Day, Catechism RAG, Ignatian Examen, Lectio Divina, and Confession prep.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf7f2",
+  "theme_color": "#7c3f1d",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

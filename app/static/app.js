@@ -13,8 +13,12 @@ const state = {
     daily: "",
     checkin: "",
     examen: "",
+    lectio: "",
   },
   speakingTarget: null,
+  timerSeconds: 180,
+  timerRemaining: 180,
+  timerInterval: null,
 };
 
 const els = {
@@ -35,10 +39,12 @@ const els = {
   tabCheckin: document.getElementById("tab-checkin"),
   tabExamen: document.getElementById("tab-examen"),
   tabConfession: document.getElementById("tab-confession"),
+  tabLectio: document.getElementById("tab-lectio"),
   panelDaily: document.getElementById("panel-daily"),
   panelCheckin: document.getElementById("panel-checkin"),
   panelExamen: document.getElementById("panel-examen"),
   panelConfession: document.getElementById("panel-confession"),
+  panelLectio: document.getElementById("panel-lectio"),
   btnGenerateDaily: document.getElementById("btn-generate-daily"),
   btnPreviewDaily: document.getElementById("btn-preview-daily"),
   dailyTelemetry: document.getElementById("daily-telemetry"),
@@ -75,6 +81,17 @@ const els = {
   confessionReflectionBody: document.getElementById("confession-reflection-body"),
   btnCopyConfession: document.getElementById("btn-copy-confession"),
   btnPrintConfession: document.getElementById("btn-print-confession"),
+  lectioForm: document.getElementById("lectio-form"),
+  lectioPhrase: document.getElementById("lectio-phrase"),
+  btnSubmitLectio: document.getElementById("btn-submit-lectio"),
+  btnPreviewLectio: document.getElementById("btn-preview-lectio"),
+  lectioTelemetry: document.getElementById("lectio-telemetry"),
+  lectioProviderPill: document.getElementById("lectio-provider-pill"),
+  lectioReflectionBody: document.getElementById("lectio-reflection-body"),
+  timerDisplay: document.getElementById("timer-display"),
+  btnTimerToggle: document.getElementById("btn-timer-toggle"),
+  btnTimerReset: document.getElementById("btn-timer-reset"),
+  timerStatus: document.getElementById("timer-status"),
 };
 
 function escapeHtml(text) {
@@ -574,6 +591,7 @@ function switchTab(target) {
     ["checkin", els.tabCheckin, els.panelCheckin],
     ["examen", els.tabExamen, els.panelExamen],
     ["confession", els.tabConfession, els.panelConfession],
+    ["lectio", els.tabLectio, els.panelLectio],
   ];
   for (const [name, tabEl, panelEl] of tabs) {
     if (!tabEl || !panelEl) continue;
@@ -585,6 +603,103 @@ function switchTab(target) {
   if (target === "confession") {
     loadSeasonMemory();
   }
+}
+
+async function submitLectioDivina({ demo = false } = {}) {
+  const selected_phrase = (els.lectioPhrase.value || "").trim();
+  const useDemo = demo || !state.hasLiveKeys;
+  els.btnSubmitLectio.disabled = true;
+  els.btnPreviewLectio.disabled = true;
+  els.lectioReflectionBody.innerHTML = `<p class="muted-placeholder">Preparing today's four-step Lectio Divina...</p>`;
+
+  try {
+    const res = await fetch("/api/v1/lectio", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        selected_phrase,
+        date: state.date,
+        offline: state.offline,
+        demo: useDemo,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Could not prepare Lectio Divina.");
+    }
+    renderCccList(data.ccc_citations);
+    state.reflections.lectio = data.reflection;
+    els.lectioTelemetry.hidden = false;
+    els.lectioProviderPill.textContent = formatProviderBadge(data.llm, data.citation_verification);
+    els.lectioReflectionBody.innerHTML = renderReflectionHtml(data.reflection);
+  } catch (err) {
+    els.lectioReflectionBody.innerHTML = `<div class="empty-sanctuary-state"><p>${escapeHtml(err.message)}</p></div>`;
+  } finally {
+    els.btnSubmitLectio.disabled = false;
+    els.btnPreviewLectio.disabled = false;
+  }
+}
+
+function playGentleChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(528, ctx.currentTime);
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 2.4);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 2.5);
+  } catch {
+    // Non-blocking
+  }
+}
+
+function renderTimer() {
+  const mins = String(Math.floor(state.timerRemaining / 60)).padStart(2, "0");
+  const secs = String(state.timerRemaining % 60).padStart(2, "0");
+  if (els.timerDisplay) {
+    els.timerDisplay.textContent = `${mins}:${secs}`;
+  }
+}
+
+function stopTimer() {
+  if (state.timerInterval) {
+    clearInterval(state.timerInterval);
+    state.timerInterval = null;
+  }
+  if (els.btnTimerToggle) {
+    els.btnTimerToggle.textContent = "Begin Stillness";
+  }
+}
+
+function toggleTimer() {
+  if (state.timerInterval) {
+    stopTimer();
+    els.timerStatus.textContent = "Paused in stillness.";
+    return;
+  }
+  if (state.timerRemaining <= 0) {
+    state.timerRemaining = state.timerSeconds;
+  }
+  playGentleChime();
+  els.btnTimerToggle.textContent = "Pause Stillness";
+  els.timerStatus.textContent = "Be still and know that I am God (Psalm 46:10).";
+  state.timerInterval = setInterval(() => {
+    state.timerRemaining -= 1;
+    renderTimer();
+    if (state.timerRemaining <= 0) {
+      stopTimer();
+      playGentleChime();
+      els.timerStatus.textContent = "Stillness complete. Carry this peace gently into your day.";
+    }
+  }, 1000);
 }
 
 function bindEvents() {
@@ -612,6 +727,9 @@ function bindEvents() {
   els.tabCheckin.addEventListener("click", () => switchTab("checkin"));
   els.tabExamen.addEventListener("click", () => switchTab("examen"));
   els.tabConfession.addEventListener("click", () => switchTab("confession"));
+  if (els.tabLectio) {
+    els.tabLectio.addEventListener("click", () => switchTab("lectio"));
+  }
 
   els.btnGenerateDaily.addEventListener("click", () => generateDailyBriefing({ demo: false }));
   els.btnPreviewDaily.addEventListener("click", () => generateDailyBriefing({ demo: true }));
@@ -654,6 +772,38 @@ function bindEvents() {
 
   if (els.btnPrintConfession) {
     els.btnPrintConfession.addEventListener("click", () => window.print());
+  }
+
+  if (els.lectioForm) {
+    els.lectioForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      submitLectioDivina({ demo: false });
+    });
+  }
+  if (els.btnPreviewLectio) {
+    els.btnPreviewLectio.addEventListener("click", () => submitLectioDivina({ demo: true }));
+  }
+
+  document.querySelectorAll(".timer-preset").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      stopTimer();
+      const mins = Number(btn.dataset.minutes || "3");
+      state.timerSeconds = mins * 60;
+      state.timerRemaining = state.timerSeconds;
+      renderTimer();
+      els.timerStatus.textContent = `Ready for ${mins} minute${mins === 1 ? "" : "s"} of quiet contemplation.`;
+    });
+  });
+  if (els.btnTimerToggle) {
+    els.btnTimerToggle.addEventListener("click", toggleTimer);
+  }
+  if (els.btnTimerReset) {
+    els.btnTimerReset.addEventListener("click", () => {
+      stopTimer();
+      state.timerRemaining = state.timerSeconds;
+      renderTimer();
+      els.timerStatus.textContent = "Set down your words and rest quietly in God's presence.";
+    });
   }
 
   document.querySelectorAll(".chip-btn").forEach((chip) => {
@@ -759,6 +909,10 @@ async function handleAudioClick(event) {
 
 async function init() {
   bindEvents();
+  renderTimer();
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/static/sw.js").catch(() => {});
+  }
   await checkEngineHealth();
   await loadLiturgyContext();
   await loadSeasonMemory();

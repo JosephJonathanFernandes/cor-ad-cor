@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Cor ad Cor — Catholic Daily Liturgical & Spiritual Companion</title>
+  <meta name="theme-color" content="#7c3f1d" />
+  <link rel="manifest" href="/static/manifest.json" />
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -141,6 +144,16 @@
             aria-controls="panel-confession"
           >
             4. Confession &amp; Continuity
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-lectio"
+            class="mode-tab"
+            aria-selected="false"
+            aria-controls="panel-lectio"
+          >
+            5. Lectio Divina
           </button>
         </div>
 
@@ -343,9 +356,14 @@
                 <span class="panel-eyebrow">Local Opt-In Journal</span>
                 <h3 class="memory-title" id="memory-summary-title">Season Memory (0 saved reflections)</h3>
               </div>
-              <button type="button" id="btn-clear-memory" class="btn-ghost" title="Delete all stored local reflections (e.g., after Confession)">
-                Wipe Memory (Clean Slate)
-              </button>
+              <div class="action-row">
+                <a href="/api/v1/memory/export" class="btn-ghost" download="cor_ad_cor_journal.json" style="text-decoration:none;">
+                  Export Journal (JSON)
+                </a>
+                <button type="button" id="btn-clear-memory" class="btn-ghost" title="Delete all stored local reflections (e.g., after Confession)">
+                  Wipe Memory (Clean Slate)
+                </button>
+              </div>
             </div>
             <div id="memory-themes-bar" class="memory-themes-bar">
               <span class="muted-placeholder">No recurring themes recorded yet.</span>
@@ -386,6 +404,71 @@
           </div>
 
           <article id="confession-reflection-body" class="reflection-prose"></article>
+        </div>
+
+        <!-- TAB 5: Guided Lectio Divina & Quiet Contemplation Timer -->
+        <div id="panel-lectio" role="tabpanel" aria-labelledby="tab-lectio" class="tab-panel" hidden>
+          <div class="companion-intro">
+            <h2 class="companion-heading">Guided Lectio Divina &amp; Contemplative Stillness</h2>
+            <p class="companion-subtext">
+              Move unhurriedly through the four ancient monastic steps—<em>Lectio</em> (Read),
+              <em>Meditatio</em> (Sit With One Phrase), <em>Oratio</em> (Speak Honestly), and
+              <em>Contemplatio</em> (Rest in Silence)—anchored to today's Gospel.
+            </p>
+          </div>
+
+          <form id="lectio-form" class="examen-form">
+            <label class="examen-field">
+              <span class="examen-label">Optional: A short phrase from today's Gospel that stood out to you</span>
+              <input
+                type="text"
+                id="lectio-phrase"
+                maxlength="500"
+                placeholder="Leave blank to let the companion highlight a focal phrase from today's Gospel..."
+              />
+            </label>
+            <div class="action-row">
+              <button type="submit" id="btn-submit-lectio" class="btn-primary">
+                Guide Lectio Divina
+              </button>
+              <button type="button" id="btn-preview-lectio" class="btn-secondary">
+                Instant Preview
+              </button>
+            </div>
+          </form>
+
+          <div class="telemetry-bar" id="lectio-telemetry" hidden>
+            <span class="provider-badge" id="lectio-provider-pill"></span>
+            <div class="audio-controls">
+              <button type="button" class="btn-audio" data-audio-target="lectio" data-audio-action="speak">
+                Listen (Calm Voice)
+              </button>
+              <button type="button" class="btn-audio" data-audio-target="lectio" data-audio-action="mp3">
+                Download MP3
+              </button>
+            </div>
+          </div>
+          <audio id="lectio-audio-player" class="voice-audio-player" controls hidden></audio>
+
+          <article id="lectio-reflection-body" class="reflection-prose"></article>
+
+          <div class="stillness-timer-card" aria-label="Quiet Contemplation Timer">
+            <div>
+              <span class="panel-eyebrow">Contemplatio</span>
+              <h3 class="memory-title">Quiet Contemplation Timer</h3>
+            </div>
+            <div class="timer-display" id="timer-display">03:00</div>
+            <div class="action-row" style="justify-content: center;">
+              <button type="button" class="chip-btn timer-preset" data-minutes="1">1 min</button>
+              <button type="button" class="chip-btn timer-preset" data-minutes="3">3 min</button>
+              <button type="button" class="chip-btn timer-preset" data-minutes="5">5 min</button>
+            </div>
+            <div class="action-row" style="justify-content: center; margin-top: 0.65rem;">
+              <button type="button" class="btn-primary" id="btn-timer-toggle">Begin Stillness</button>
+              <button type="button" class="btn-secondary" id="btn-timer-reset">Reset</button>
+            </div>
+            <p class="timer-status" id="timer-status">Set down your words and rest quietly in God's presence.</p>
+          </div>
         </div>
       </div>
     </section>
