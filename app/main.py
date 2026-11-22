@@ -30,6 +30,13 @@ from app.services.companion import CompanionReply, CompanionService
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
+class CheckInTurn(BaseModel):
+    """One prior turn in an in-session check-in spiritual dialogue."""
+
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., min_length=1, max_length=2500)
+
+
 class CheckInRequest(BaseModel):
     """Payload for a personal 'Bring Your Day to Today's Mass' check-in."""
 
@@ -38,6 +45,7 @@ class CheckInRequest(BaseModel):
     offline: bool = False
     demo: bool = False
     remember: bool = False
+    history: list[CheckInTurn] = Field(default_factory=list, max_length=8)
 
 
 class ExamenRequest(BaseModel):
@@ -255,6 +263,7 @@ def create_app(
                 offline=payload.offline,
                 demo=payload.demo,
                 remember=payload.remember,
+                history=[turn.model_dump() for turn in payload.history],
             )
         except AllProvidersExhaustedError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -311,6 +320,8 @@ def create_app(
         return {
             "total_entries": summary.total_entries,
             "season": summary.season,
+            "distinct_days": summary.distinct_days,
+            "last_entry_date": summary.last_entry_date,
             "top_themes": [
                 {"theme": theme, "count": count} for theme, count in summary.top_themes
             ],
@@ -366,6 +377,16 @@ def create_app(
             "query": q,
             "results": _serialize_ccc_hits(hits),
         }
+
+    @application.get("/api/v1/ccc/{paragraph}")
+    def get_ccc_paragraph(
+        paragraph: int,
+        service: CompanionService = Depends(get_service),
+    ) -> dict[str, Any]:
+        hit = service.ccc_index.get_by_paragraph(paragraph)
+        if hit is None:
+            raise HTTPException(status_code=404, detail=f"CCC §{paragraph} not found in current index.")
+        return _serialize_ccc_hits([hit])[0]
 
     @application.post("/api/v1/audio/script")
     def build_audio_script(payload: AudioVoiceNoteRequest) -> dict[str, Any]:

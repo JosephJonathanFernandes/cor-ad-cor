@@ -108,16 +108,28 @@ def build_checkin_prompt(
     ccc_hits: list[CatechismHit],
     *,
     memory_context: str = "",
+    history: list[dict[str, str]] | None = None,
 ) -> str:
-    """Build the user prompt for a personal 'Bring Your Day to Mass' check-in."""
+    """Build the user prompt for a personal 'Bring Your Day to Mass' check-in or follow-up."""
     memory_block = (
         f"\n=== SEASON CONTINUITY (OPT-IN PRIVATE MEMORY) ===\n{memory_context}\n"
         if memory_context
         else ""
     )
-    return f"""A user has shared something honest they are carrying today and wants to bring it alongside today's Mass readings and Catholic teaching.
+    history_block = ""
+    if history:
+        turns = []
+        for turn in history[-4:]:
+            role = "User" if turn.get("role") == "user" else "Companion"
+            content = str(turn.get("content", "")).strip()[:450]
+            if content:
+                turns.append(f"- {role}: {content}")
+        if turns:
+            history_block = "\n=== EARLIER IN THIS REFLECTION CONVERSATION ===\n" + "\n".join(turns) + "\n"
 
-=== WHAT THE USER SHARED ===
+    return f"""A user is reflecting honestly on what they are carrying today alongside today's Mass readings and Catholic teaching.
+{history_block}
+=== WHAT THE USER JUST SHARED ===
 "{user_note.strip()}"
 {memory_block}
 === TODAY'S LITURGICAL CONTEXT ===
@@ -127,10 +139,10 @@ def build_checkin_prompt(
 {_format_ccc_context(ccc_hits)}
 
 Respond in the compassionate spiritual companion voice:
-1. **Acknowledge First:** Meet what they shared with warmth and zero judgment. Don't rush to fix it or offer toxic positivity. If season continuity notes show a recurring theme, notice it gently without sounding clinical.
+1. **Acknowledge First:** Meet what they shared with warmth and zero judgment. If this is a follow-up turn, build naturally on what was already said without repeating yourself.
 2. **Bridge to Today's Word:** Gently show how something in today's readings ([First Reading], [Responsorial Psalm], [Gospel]) or [Saint] speaks into that exact place—without forcing a fake connection.
 3. **Catechism Grounding:** Connect 1 retrieved [CCC §N] paragraph clearly in plain words, keeping the exact [CCC §N] citation.
-4. **Two Honest Questions:** Offer 1–2 unhurried questions they can sit with in prayer today.
+4. **Honest Reflection Question:** Offer 1–2 unhurried questions they can sit with in prayer today.
 5. **Small Concrete Anchor:** End with a short 2-sentence prayer (and if their struggle touches deep guilt or spiritual discernment, gently mention talking with a priest in Confession or a trusted spiritual director/counselor as a real next step)."""
 
 

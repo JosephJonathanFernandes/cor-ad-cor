@@ -74,6 +74,8 @@ class SeasonMemorySummary:
     season: str
     top_themes: list[tuple[str, int]]
     recent_entries: list[JournalEntry]
+    distinct_days: int = 0
+    last_entry_date: str = ""
 
     def prompt_context(self) -> str:
         """Render a concise, privacy-respecting summary for the companion LLM prompt."""
@@ -232,11 +234,16 @@ class JournalStore:
         for entry in entries:
             counter.update(entry.themes)
 
+        distinct_days = len({entry.liturgical_date for entry in entries if entry.liturgical_date})
+        last_entry_date = entries[0].liturgical_date if entries else ""
+
         return SeasonMemorySummary(
             total_entries=len(entries),
             season=season or (entries[0].season if entries else "Ordinary Time"),
             top_themes=counter.most_common(6),
             recent_entries=entries[:6],
+            distinct_days=distinct_days,
+            last_entry_date=last_entry_date,
         )
 
     def clear_all(self) -> int:

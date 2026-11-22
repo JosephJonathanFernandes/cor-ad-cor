@@ -229,6 +229,7 @@ class CompanionService:
         ccc_k: int = 3,
         demo: bool = False,
         remember: bool = False,
+        history: list[dict[str, str]] | None = None,
     ) -> CompanionReply:
         """Generate a grounded reflection connecting the user's day to today's liturgy."""
         day = self.get_day(target_date, offline=offline)
@@ -271,6 +272,7 @@ class CompanionService:
             day,
             ccc_hits,
             memory_context=memory_ctx,
+            history=history,
         )
         result = self.router.generate(COMPANION_SYSTEM_PROMPT, prompt, temperature=0.45)
         return self._finalize_reply(

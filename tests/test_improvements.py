@@ -120,3 +120,50 @@ def test_sse_daily_stream_endpoint(tmp_path: Path) -> None:
     assert "event: chunk" in body
     assert "event: done" in body
     assert "citation_verification" in body
+
+
+def test_exact_ccc_endpoint_multiturn_checkin_and_rhythm_stats(tmp_path: Path) -> None:
+    seed_path = Path(__file__).resolve().parent.parent / "data" / "ccc" / "ccc_seed.json"
+    settings = Settings(
+        ccc_seed_path=seed_path,
+        ccc_index_dir=tmp_path / "idx",
+        readings_cache_dir=tmp_path / "cache",
+        journal_db_path=tmp_path / "journal" / "memory.db",
+    )
+    router = GroqGeminiRouter(groq_keys=[], gemini_api_key="")
+    ccc_index = CatechismIndex.load_or_build(
+        index_dir=settings.ccc_index_dir,
+        source_path=seed_path,
+        embeddings=LocalDeterministicEmbeddings(),
+    )
+    service = CompanionService(settings=settings, router=router, ccc_index=ccc_index)
+    app = create_app(service_override=service)
+
+    with TestClient(app) as client:
+        ok = client.get("/api/v1/ccc/2729")
+        assert ok.status_code == 200
+        assert ok.json()["paragraph"] == 2729
+
+        missing = client.get("/api/v1/ccc/9999")
+        assert missing.status_code == 404
+
+        followup = client.post(
+            "/api/v1/checkin",
+            json={
+                "message": "Honestly I think I am afraid of slowing down.",
+                "date": "2026-11-22",
+                "offline": True,
+                "demo": True,
+                "remember": True,
+                "history": [
+                    {"role": "user", "content": "I feel burned out at work."},
+                    {"role": "assistant", "content": "What feels heaviest right now?"},
+                ],
+            },
+        )
+        assert followup.status_code == 200
+
+        mem = client.get("/api/v1/memory")
+        assert mem.status_code == 200
+        assert mem.json()["distinct_days"] == 1
+        assert mem.json()["last_entry_date"] == "2026-11-22"
