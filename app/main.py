@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,7 @@ from app.delivery.audio import (
 )
 from app.delivery.telegram_bot import TelegramCompanionBot
 from app.llm.router import AllProvidersExhaustedError
+from app.middleware import SecurityAndRateLimitMiddleware
 from app.rag.catechism import CatechismHit
 from app.services.companion import CompanionReply, CompanionService
 
@@ -66,6 +67,15 @@ class AudioVoiceNoteRequest(BaseModel):
     voice: str | None = None
 
 
+class LectioRequest(BaseModel):
+    """Payload for guided 4-step Lectio Divina anchored to today's Gospel."""
+
+    selected_phrase: str = Field(default="", max_length=500)
+    date: dt.date | None = None
+    offline: bool = False
+    demo: bool = False
+
+
 def _serialize_ccc_hits(hits: list[CatechismHit]) -> list[dict[str, Any]]:
     return [
         {
@@ -103,6 +113,7 @@ def _serialize_reply(reply: CompanionReply) -> dict[str, Any]:
 def create_app(
     service_override: CompanionService | None = None,
     synthesizer_override: VoiceNoteSynthesizer | None = None,
+    rate_limit_per_minute: int | None = None,
 ) -> FastAPI:
     """Application factory supporting dependency injection in tests."""
 
@@ -124,9 +135,20 @@ def create_app(
 
     application = FastAPI(
         title="Cor ad Cor — Catholic Daily Liturgical Companion",
-        version="0.4.0",
+        version="0.5.0",
         lifespan=lifespan,
     )
+
+    rpm = (
+        rate_limit_per_minute
+        if rate_limit_per_minute is not None
+        else (
+            service_override.settings.rate_limit_per_minute
+            if service_override is not None
+            else get_settings().rate_limit_per_minute
+        )
+    )
+    application.add_middleware(SecurityAndRateLimitMiddleware, requests_per_minute=rpm)
 
     if STATIC_DIR.exists():
         application.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -296,6 +318,37 @@ def create_app(
     ) -> dict[str, Any]:
         deleted = service.clear_memory()
         return {"status": "cleared", "deleted_entries": deleted}
+
+    @application.get("/api/v1/memory/export")
+    def export_season_memory(
+        service: CompanionService = Depends(get_service),
+    ) -> JSONResponse:
+        entries = service.export_memory_entries()
+        payload = {
+            "exported_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+            "total_entries": len(entries),
+            "entries": [asdict(entry) for entry in entries],
+        }
+        return JSONResponse(
+            content=payload,
+            headers={"Content-Disposition": 'attachment; filename="cor_ad_cor_journal.json"'},
+        )
+
+    @application.post("/api/v1/lectio")
+    def post_lectio_divina(
+        payload: LectioRequest,
+        service: CompanionService = Depends(get_service),
+    ) -> dict[str, Any]:
+        try:
+            reply = service.lectio_divina(
+                selected_phrase=payload.selected_phrase,
+                target_date=payload.date,
+                offline=payload.offline,
+                demo=payload.demo,
+            )
+        except AllProvidersExhaustedError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return _serialize_reply(reply)
 
     @application.get("/api/v1/ccc/search")
     def search_ccc(

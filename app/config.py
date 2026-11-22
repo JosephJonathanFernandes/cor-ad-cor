@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     telegram_webhook_secret: str = ""
+    rate_limit_per_minute: int = Field(default=30, ge=0)
 
     def get_groq_keys(self) -> list[str]:
         """Return deduplicated, non-empty Groq API keys in priority order."""
