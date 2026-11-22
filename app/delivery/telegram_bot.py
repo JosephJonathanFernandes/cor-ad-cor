@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from app.data_sources.rosary import get_rosary_for_date
 from app.delivery.audio import VoiceNoteSynthesizer
 from app.services.companion import CompanionService
 
@@ -23,6 +24,7 @@ WELCOME_MESSAGE = (
     "• /voice — Calm spoken MP3 voice-note of today's reflection\n"
     "• /examen gratitude | consolation | desolation — 3-Minute Evening Ignatian Examen\n"
     "• /confession [optional focus] — Gentle Examination of Conscience & Confession prep\n"
+    "• /rosary — Today's 5 Rosary Mysteries with Fruits & CCC anchors\n"
     "• /ccc <topic> — Search the Catechism of the Catholic Church\n"
     "• /wipe — Clear your saved local season memory (Clean Slate)\n\n"
     "Or simply send any honest sentence about what you're carrying today to bring it alongside today's Mass readings.\n\n"
@@ -168,6 +170,16 @@ class TelegramCompanionBot:
                 demo=use_demo,
             )
             return BotAction(chat_id=chat_id, text=reply.reflection)
+
+        if lower.startswith("/rosary"):
+            rosary = get_rosary_for_date()
+            lines = [f"{rosary.weekday} — {rosary.mystery_set} ({rosary.date})"]
+            for m in rosary.mysteries:
+                lines.append(
+                    f"\n{m.number}. {m.title} ({m.scripture}) — Fruit: {m.fruit} [CCC §{m.ccc_paragraph}]\n"
+                    f"   {m.intention}"
+                )
+            return BotAction(chat_id=chat_id, text="\n".join(lines))
 
         if lower.startswith("/ccc"):
             query = raw_text[len("/ccc") :].strip()

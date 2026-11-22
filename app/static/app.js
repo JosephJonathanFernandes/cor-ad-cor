@@ -33,6 +33,9 @@ const els = {
   readingsList: document.getElementById("readings-list"),
   saintBody: document.getElementById("saint-body"),
   cccList: document.getElementById("ccc-list"),
+  rosaryWeekdayEyebrow: document.getElementById("rosary-weekday-eyebrow"),
+  rosarySetTitle: document.getElementById("rosary-set-title"),
+  rosaryList: document.getElementById("rosary-list"),
   cccSearchForm: document.getElementById("ccc-search-form"),
   cccSearchInput: document.getElementById("ccc-search-input"),
   tabDaily: document.getElementById("tab-daily"),
@@ -327,11 +330,44 @@ async function loadLiturgyContext() {
     date: state.date,
     offline: String(state.offline),
   });
-  const res = await fetch(`/api/v1/liturgy?${params}`);
-  if (!res.ok) return;
-  const data = await res.json();
-  renderLiturgy(data.liturgy);
-  renderCccList(data.ccc_citations);
+  const [litRes, rosRes] = await Promise.all([
+    fetch(`/api/v1/liturgy?${params}`),
+    fetch(`/api/v1/rosary?${new URLSearchParams({ date: state.date })}`),
+  ]);
+  if (litRes.ok) {
+    const data = await litRes.json();
+    renderLiturgy(data.liturgy);
+    renderCccList(data.ccc_citations);
+  }
+  if (rosRes.ok) {
+    const rosary = await rosRes.json();
+    renderRosary(rosary);
+  }
+}
+
+function renderRosary(rosary) {
+  if (!els.rosaryList || !rosary) return;
+  els.rosaryWeekdayEyebrow.textContent = `${rosary.weekday} Rosary`;
+  els.rosarySetTitle.textContent = rosary.mystery_set;
+  els.rosaryList.innerHTML = (rosary.mysteries || [])
+    .map(
+      (m) => `
+      <details class="reading-item">
+        <summary>
+          <span>${m.number}. ${escapeHtml(m.title)}</span>
+          <span class="reading-citation">${escapeHtml(m.fruit)}</span>
+        </summary>
+        <div class="reading-text" style="font-family:var(--font-sans); font-size:0.88rem;">
+          <div style="color:var(--text-muted); margin-bottom:0.35rem;">
+            ${escapeHtml(m.scripture)} &bull;
+            <button type="button" class="citation-pill pill-ccc" data-cite="CCC §${m.ccc_paragraph}">[CCC §${m.ccc_paragraph}]</button>
+          </div>
+          <div>${escapeHtml(m.intention)}</div>
+        </div>
+      </details>
+    `
+    )
+    .join("");
 }
 
 async function generateDailyBriefing({ demo = false } = {}) {

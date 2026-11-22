@@ -7,7 +7,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.data_sources.liturgy import parse_universalis_jsonp
+from app.data_sources.liturgy import normalize_bible_api_reference, parse_universalis_jsonp
+from app.data_sources.rosary import get_rosary_for_date
 from app.llm.router import GroqGeminiRouter
 from app.main import create_app
 from app.rag.catechism import CatechismIndex, LocalDeterministicEmbeddings
@@ -27,6 +28,21 @@ def test_parse_universalis_jsonp() -> None:
     assert readings[0].label == "First Reading"
     assert readings[2].label == "Gospel"
     assert "Son of Man" in readings[2].text
+
+
+def test_bible_api_reference_normalization_and_rosary() -> None:
+    assert normalize_bible_api_reference("Psalm 23:1-2, 2-3, 5-6") == "Psalm 23:1-6"
+    assert normalize_bible_api_reference("1 Corinthians 15:20-26, 28") == "1 Corinthians 15:20-28"
+
+    import datetime as dt
+
+    sunday = get_rosary_for_date(dt.date(2026, 11, 22))
+    assert sunday.weekday == "Sunday"
+    assert sunday.mystery_set == "Glorious Mysteries"
+    assert len(sunday.mysteries) == 5
+
+    thursday = get_rosary_for_date(dt.date(2026, 11, 19))
+    assert thursday.mystery_set == "Luminous Mysteries"
 
 
 def test_lectio_pwa_export_and_rate_limiting(tmp_path: Path) -> None:

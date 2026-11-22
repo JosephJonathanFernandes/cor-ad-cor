@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
+from app.data_sources.rosary import get_rosary_for_date
 from app.delivery.audio import (
     VoiceNoteSynthesizer,
     estimate_duration_seconds,
@@ -190,6 +191,10 @@ def create_app(
             "liturgy": day.model_dump(),
             "ccc_citations": _serialize_ccc_hits(ccc_hits),
         }
+
+    @application.get("/api/v1/rosary")
+    def get_daily_rosary(date: dt.date | None = Query(default=None)) -> dict[str, Any]:
+        return get_rosary_for_date(date).to_dict()
 
     @application.get("/api/v1/daily")
     def get_daily_briefing(
