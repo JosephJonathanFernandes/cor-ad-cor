@@ -73,6 +73,8 @@ const els = {
   confessionTelemetry: document.getElementById("confession-telemetry"),
   confessionProviderPill: document.getElementById("confession-provider-pill"),
   confessionReflectionBody: document.getElementById("confession-reflection-body"),
+  btnCopyConfession: document.getElementById("btn-copy-confession"),
+  btnPrintConfession: document.getElementById("btn-print-confession"),
 };
 
 function escapeHtml(text) {
@@ -256,12 +258,21 @@ function renderCccList(citations) {
     .join("");
 }
 
-function formatProviderBadge(llm) {
-  if (!llm) return "Pastoral Safety Guardrail";
-  if (llm.provider === "preview") {
-    return "Preview Mode (Citation-Grounded Template)";
+function formatProviderBadge(llm, verification = null) {
+  let base = "Pastoral Safety Guardrail";
+  if (llm) {
+    base =
+      llm.provider === "preview"
+        ? "Preview Mode (Citation-Grounded Template)"
+        : `Served by ${llm.provider.toUpperCase()} (${llm.key_slot || llm.model})`;
   }
-  return `Served by ${llm.provider.toUpperCase()} (${llm.key_slot || llm.model})`;
+  if (verification && verification.cited_paragraphs && verification.cited_paragraphs.length > 0) {
+    const ok = verification.verified_paragraphs.length;
+    const total = verification.cited_paragraphs.length;
+    const mark = verification.all_valid ? "✓" : "⚠";
+    return `${base} • ${mark} ${ok}/${total} CCC citations verified`;
+  }
+  return base;
 }
 
 async function checkEngineHealth() {
@@ -302,12 +313,66 @@ async function generateDailyBriefing({ demo = false } = {}) {
   els.btnPreviewDaily.disabled = true;
   els.dailyReflectionBody.innerHTML = `<p class="muted-placeholder">Preparing today's liturgical reflection...</p>`;
 
-  try {
-    const params = new URLSearchParams({
-      date: state.date,
-      offline: String(state.offline),
-      demo: String(useDemo),
+  const params = new URLSearchParams({
+    date: state.date,
+    offline: String(state.offline),
+    demo: String(useDemo),
+  });
+
+  // Use Server-Sent Events (/api/v1/daily/stream) for progressive token/chunk rendering
+  if (typeof EventSource !== "undefined") {
+    await new Promise((resolve) => {
+      let streamedText = "";
+      const es = new EventSource(`/api/v1/daily/stream?${params}`);
+
+      es.addEventListener("context", (evt) => {
+        const data = JSON.parse(evt.data);
+        renderLiturgy(data.liturgy);
+        renderCccList(data.ccc_citations);
+      });
+
+      es.addEventListener("chunk", (evt) => {
+        const data = JSON.parse(evt.data);
+        streamedText += data.delta || "";
+        els.dailyReflectionBody.innerHTML = renderReflectionHtml(streamedText);
+      });
+
+      es.addEventListener("done", (evt) => {
+        const data = JSON.parse(evt.data);
+        renderLiturgy(data.liturgy);
+        renderCccList(data.ccc_citations);
+        state.reflections.daily = data.reflection;
+        els.dailyTelemetry.hidden = false;
+        els.dailyProviderPill.textContent = formatProviderBadge(
+          data.llm,
+          data.citation_verification
+        );
+        els.dailyReflectionBody.innerHTML = renderReflectionHtml(data.reflection);
+        es.close();
+        resolve();
+      });
+
+      es.addEventListener("error", (evt) => {
+        es.close();
+        if (!streamedText) {
+          let msg = "Failed to stream daily reflection.";
+          try {
+            if (evt.data) msg = JSON.parse(evt.data).detail || msg;
+          } catch {
+            // ignore
+          }
+          els.dailyReflectionBody.innerHTML = `<div class="empty-sanctuary-state"><p>${escapeHtml(msg)}</p></div>`;
+        }
+        resolve();
+      });
     });
+
+    els.btnGenerateDaily.disabled = false;
+    els.btnPreviewDaily.disabled = false;
+    return;
+  }
+
+  try {
     const res = await fetch(`/api/v1/daily?${params}`);
     const data = await res.json();
     if (!res.ok) {
@@ -317,7 +382,7 @@ async function generateDailyBriefing({ demo = false } = {}) {
     renderCccList(data.ccc_citations);
     state.reflections.daily = data.reflection;
     els.dailyTelemetry.hidden = false;
-    els.dailyProviderPill.textContent = formatProviderBadge(data.llm);
+    els.dailyProviderPill.textContent = formatProviderBadge(data.llm, data.citation_verification);
     els.dailyReflectionBody.innerHTML = renderReflectionHtml(data.reflection);
   } catch (err) {
     els.dailyReflectionBody.innerHTML = `<div class="empty-sanctuary-state"><p>${escapeHtml(err.message)}</p></div>`;
@@ -357,7 +422,7 @@ async function submitCheckin({ demo = false } = {}) {
     renderCccList(data.ccc_citations);
     state.reflections.checkin = data.reflection;
     els.checkinTelemetry.hidden = false;
-    els.checkinProviderPill.textContent = formatProviderBadge(data.llm);
+    els.checkinProviderPill.textContent = formatProviderBadge(data.llm, data.citation_verification);
 
     const rendered = renderReflectionHtml(data.reflection);
     els.checkinReflectionBody.innerHTML = data.crisis_escalated
@@ -408,7 +473,7 @@ async function submitExamen({ demo = false } = {}) {
     renderCccList(data.ccc_citations);
     state.reflections.examen = data.reflection;
     els.examenTelemetry.hidden = false;
-    els.examenProviderPill.textContent = formatProviderBadge(data.llm);
+    els.examenProviderPill.textContent = formatProviderBadge(data.llm, data.citation_verification);
     const rendered = renderReflectionHtml(data.reflection);
     els.examenReflectionBody.innerHTML = data.crisis_escalated
       ? `<div class="crisis-alert-card">${rendered}</div>`
@@ -490,7 +555,7 @@ async function submitConfessionPrep({ demo = false } = {}) {
     }
     renderCccList(data.ccc_citations);
     els.confessionTelemetry.hidden = false;
-    els.confessionProviderPill.textContent = formatProviderBadge(data.llm);
+    els.confessionProviderPill.textContent = formatProviderBadge(data.llm, data.citation_verification);
     const rendered = renderReflectionHtml(data.reflection);
     els.confessionReflectionBody.innerHTML = data.crisis_escalated
       ? `<div class="crisis-alert-card">${rendered}</div>`
@@ -570,6 +635,26 @@ function bindEvents() {
   els.btnPreviewConfession.addEventListener("click", () => submitConfessionPrep({ demo: true }));
 
   els.btnClearMemory.addEventListener("click", clearSeasonMemory);
+
+  if (els.btnCopyConfession) {
+    els.btnCopyConfession.addEventListener("click", async () => {
+      const text = els.confessionReflectionBody.innerText.trim();
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        els.btnCopyConfession.textContent = "Copied!";
+        setTimeout(() => {
+          els.btnCopyConfession.textContent = "Copy for Confession";
+        }, 1800);
+      } catch {
+        alert("Could not copy automatically. Please select and copy the text.");
+      }
+    });
+  }
+
+  if (els.btnPrintConfession) {
+    els.btnPrintConfession.addEventListener("click", () => window.print());
+  }
 
   document.querySelectorAll(".chip-btn").forEach((chip) => {
     chip.addEventListener("click", () => {

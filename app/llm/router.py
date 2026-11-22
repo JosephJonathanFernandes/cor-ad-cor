@@ -168,3 +168,105 @@ class GroqGeminiRouter:
         raise AllProvidersExhaustedError(
             "All configured LLM providers failed or are cooling down: " + " | ".join(errors)
         )
+
+    def stream(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        temperature: float = 0.4,
+    ):
+        """Yield text chunks from Groq (4-key rotation) or Gemini fallback, returning LLMResult metadata."""
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+        errors: list[str] = []
+        attempts = 0
+        now = self.clock()
+
+        for idx in self._active_groq_indices(now):
+            attempts += 1
+            slot = f"groq_key_{idx + 1}"
+            emitted = False
+            try:
+                client = self._build_groq_client(self.groq_keys[idx], temperature)
+                if hasattr(client, "stream"):
+                    for chunk in client.stream(messages):
+                        piece = _extract_text(chunk)
+                        if piece:
+                            emitted = True
+                            yield piece, LLMResult(
+                                content="",
+                                provider="groq",
+                                model=self.groq_model,
+                                key_slot=slot,
+                                attempts=attempts,
+                            )
+                else:
+                    text = _extract_text(client.invoke(messages))
+                    if text:
+                        emitted = True
+                        yield text, LLMResult(
+                            content="",
+                            provider="groq",
+                            model=self.groq_model,
+                            key_slot=slot,
+                            attempts=attempts,
+                        )
+                if not emitted:
+                    raise ValueError("Empty stream from Groq")
+                self._next_index = (idx + 1) % len(self.groq_keys)
+                return
+            except Exception as exc:  # noqa: BLE001
+                if emitted:
+                    raise
+                cooldown = (
+                    max(self.cooldown_seconds * 10, 600)
+                    if _is_permanent_auth_error(exc)
+                    else self.cooldown_seconds
+                )
+                self._cooldown_until[idx] = self.clock() + cooldown
+                errors.append(f"{slot}: {type(exc).__name__}: {exc}")
+                logger.warning("Groq %s stream failed (%s); rotating.", slot, type(exc).__name__)
+
+        if self.gemini_api_key.strip():
+            attempts += 1
+            emitted = False
+            try:
+                gemini_client = self._build_gemini_client(temperature)
+                if hasattr(gemini_client, "stream"):
+                    for chunk in gemini_client.stream(messages):
+                        piece = _extract_text(chunk)
+                        if piece:
+                            emitted = True
+                            yield piece, LLMResult(
+                                content="",
+                                provider="gemini",
+                                model=self.gemini_model,
+                                key_slot="gemini_fallback",
+                                attempts=attempts,
+                            )
+                else:
+                    text = _extract_text(gemini_client.invoke(messages))
+                    if text:
+                        emitted = True
+                        yield text, LLMResult(
+                            content="",
+                            provider="gemini",
+                            model=self.gemini_model,
+                            key_slot="gemini_fallback",
+                            attempts=attempts,
+                        )
+                if not emitted:
+                    raise ValueError("Empty stream from Gemini")
+                return
+            except Exception as exc:  # noqa: BLE001
+                if emitted:
+                    raise
+                errors.append(f"gemini_fallback: {type(exc).__name__}: {exc}")
+                logger.error("Gemini fallback stream failed: %s", exc)
+
+        raise AllProvidersExhaustedError(
+            "All configured LLM providers failed or are cooling down: " + " | ".join(errors)
+        )

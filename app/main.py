@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -79,12 +80,22 @@ def _serialize_ccc_hits(hits: list[CatechismHit]) -> list[dict[str, Any]]:
 
 
 def _serialize_reply(reply: CompanionReply) -> dict[str, Any]:
+    verification = None
+    if reply.verification is not None:
+        verification = {
+            "cited_paragraphs": reply.verification.cited_paragraphs,
+            "verified_paragraphs": reply.verification.verified_paragraphs,
+            "hydrated_paragraphs": reply.verification.hydrated_paragraphs,
+            "unverified_paragraphs": reply.verification.unverified_paragraphs,
+            "all_valid": reply.verification.all_valid,
+        }
     return {
         "liturgy": reply.liturgy.model_dump(),
         "ccc_citations": _serialize_ccc_hits(reply.ccc_hits),
         "reflection": reply.reflection,
         "crisis_escalated": reply.crisis_escalated,
         "saved_entry_id": reply.saved_entry_id,
+        "citation_verification": verification,
         "llm": asdict(reply.llm) if reply.llm else None,
     }
 
@@ -170,6 +181,40 @@ def create_app(
         except AllProvidersExhaustedError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return _serialize_reply(reply)
+
+    @application.get("/api/v1/daily/stream")
+    def stream_daily_briefing(
+        date: dt.date | None = Query(default=None),
+        offline: bool = Query(default=False),
+        demo: bool = Query(default=False),
+        service: CompanionService = Depends(get_service),
+    ) -> StreamingResponse:
+        def event_stream():
+            try:
+                for event_name, payload in service.stream_daily_briefing(
+                    target_date=date,
+                    offline=offline,
+                    demo=demo,
+                ):
+                    if event_name == "context":
+                        day, hits = payload
+                        body = {
+                            "liturgy": day.model_dump(),
+                            "ccc_citations": _serialize_ccc_hits(hits),
+                        }
+                    elif event_name == "chunk":
+                        body = {"delta": payload}
+                    else:
+                        body = _serialize_reply(payload)
+                    yield f"event: {event_name}\ndata: {json.dumps(body, ensure_ascii=False)}\n\n"
+            except AllProvidersExhaustedError as exc:
+                yield f"event: error\ndata: {json.dumps({'detail': str(exc)})}\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @application.post("/api/v1/checkin")
     def post_checkin(

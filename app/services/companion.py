@@ -23,6 +23,7 @@ from app.prompts.companion import (
     detect_distress_signal,
 )
 from app.rag.catechism import CatechismHit, CatechismIndex, build_embeddings
+from app.rag.verifier import CitationVerification, verify_and_hydrate_citations
 
 
 def _preview_llm_result() -> LLMResult:
@@ -45,6 +46,7 @@ class CompanionReply:
     llm: LLMResult | None
     crisis_escalated: bool = False
     saved_entry_id: int | None = None
+    verification: CitationVerification | None = None
 
 
 class CompanionService:
@@ -111,6 +113,32 @@ class CompanionService:
         ccc_hits = self.ccc_index.search(day.theme_query(), k=ccc_k)
         return day, ccc_hits
 
+    def _finalize_reply(
+        self,
+        *,
+        liturgy: LiturgicalDay,
+        ccc_hits: list[CatechismHit],
+        reflection: str,
+        llm: LLMResult | None,
+        crisis_escalated: bool = False,
+        saved_entry_id: int | None = None,
+    ) -> CompanionReply:
+        """Run post-generation CCC citation verification and auto-hydration."""
+        hydrated_hits, verification = verify_and_hydrate_citations(
+            reflection,
+            ccc_hits,
+            self.ccc_index,
+        )
+        return CompanionReply(
+            liturgy=liturgy,
+            ccc_hits=hydrated_hits,
+            reflection=reflection,
+            llm=llm,
+            crisis_escalated=crisis_escalated,
+            saved_entry_id=saved_entry_id,
+            verification=verification,
+        )
+
     def daily_briefing(
         self,
         *,
@@ -126,7 +154,7 @@ class CompanionService:
             ccc_k=ccc_k,
         )
         if demo:
-            return CompanionReply(
+            return self._finalize_reply(
                 liturgy=day,
                 ccc_hits=ccc_hits,
                 reflection=build_preview_daily_reflection(day, ccc_hits),
@@ -134,11 +162,60 @@ class CompanionService:
             )
         prompt = build_daily_briefing_prompt(day, ccc_hits)
         result = self.router.generate(COMPANION_SYSTEM_PROMPT, prompt, temperature=0.35)
-        return CompanionReply(
+        return self._finalize_reply(
             liturgy=day,
             ccc_hits=ccc_hits,
             reflection=result.content,
             llm=result,
+        )
+
+    def stream_daily_briefing(
+        self,
+        *,
+        target_date: dt.date | None = None,
+        offline: bool = False,
+        ccc_k: int = 3,
+        demo: bool = False,
+    ):
+        """Yield ('context' | 'chunk' | 'done', payload) events for SSE streaming."""
+        day, ccc_hits = self.liturgy_context(
+            target_date=target_date,
+            offline=offline,
+            ccc_k=ccc_k,
+        )
+        yield "context", (day, ccc_hits)
+
+        if demo:
+            full_text = build_preview_daily_reflection(day, ccc_hits)
+            words = full_text.split(" ")
+            step = 10
+            for idx in range(0, len(words), step):
+                chunk = " ".join(words[idx : idx + step])
+                if idx + step < len(words):
+                    chunk += " "
+                yield "chunk", chunk
+            yield "done", self._finalize_reply(
+                liturgy=day,
+                ccc_hits=ccc_hits,
+                reflection=full_text,
+                llm=_preview_llm_result(),
+            )
+            return
+
+        prompt = build_daily_briefing_prompt(day, ccc_hits)
+        accumulated: list[str] = []
+        last_meta: LLMResult | None = None
+        for piece, meta in self.router.stream(COMPANION_SYSTEM_PROMPT, prompt, temperature=0.35):
+            accumulated.append(piece)
+            last_meta = meta
+            yield "chunk", piece
+
+        full_text = "".join(accumulated).strip()
+        yield "done", self._finalize_reply(
+            liturgy=day,
+            ccc_hits=ccc_hits,
+            reflection=full_text,
+            llm=last_meta,
         )
 
     def personal_checkin(
@@ -180,7 +257,7 @@ class CompanionService:
             saved_id = entry.id
 
         if demo:
-            return CompanionReply(
+            return self._finalize_reply(
                 liturgy=day,
                 ccc_hits=ccc_hits,
                 reflection=build_preview_checkin_reflection(user_message, day, ccc_hits),
@@ -194,7 +271,7 @@ class CompanionService:
             memory_context=memory_ctx,
         )
         result = self.router.generate(COMPANION_SYSTEM_PROMPT, prompt, temperature=0.45)
-        return CompanionReply(
+        return self._finalize_reply(
             liturgy=day,
             ccc_hits=ccc_hits,
             reflection=result.content,
@@ -246,7 +323,7 @@ class CompanionService:
             saved_id = entry.id
 
         if demo:
-            return CompanionReply(
+            return self._finalize_reply(
                 liturgy=day,
                 ccc_hits=ccc_hits,
                 reflection=build_preview_examen_reflection(
@@ -270,7 +347,7 @@ class CompanionService:
             memory_context=memory_ctx,
         )
         result = self.router.generate(COMPANION_SYSTEM_PROMPT, prompt, temperature=0.4)
-        return CompanionReply(
+        return self._finalize_reply(
             liturgy=day,
             ccc_hits=ccc_hits,
             reflection=result.content,
@@ -309,7 +386,7 @@ class CompanionService:
         memory_ctx = summary.prompt_context()
 
         if demo:
-            return CompanionReply(
+            return self._finalize_reply(
                 liturgy=day,
                 ccc_hits=ccc_hits,
                 reflection=build_preview_confession_prep_reflection(
@@ -328,7 +405,7 @@ class CompanionService:
             memory_context=memory_ctx,
         )
         result = self.router.generate(COMPANION_SYSTEM_PROMPT, prompt, temperature=0.35)
-        return CompanionReply(
+        return self._finalize_reply(
             liturgy=day,
             ccc_hits=ccc_hits,
             reflection=result.content,

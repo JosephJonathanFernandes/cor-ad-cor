@@ -86,7 +86,7 @@
           <input
             type="search"
             id="ccc-search-input"
-            placeholder="Search Catechism themes (e.g., dryness, mercy, Eucharist)..."
+            placeholder="Search CCC themes or paragraph # (e.g., 1374, dryness, mercy)..."
             aria-label="Search Catechism"
           />
           <button type="submit" class="btn-secondary">Search CCC</button>
@@ -375,7 +375,14 @@
 
           <div class="telemetry-bar" id="confession-telemetry" hidden>
             <span class="provider-badge" id="confession-provider-pill"></span>
-            <span class="citation-tip">Grounded in CCC &sect;1422–1441 &amp; &sect;1776 (Sacrament of Penance)</span>
+            <div class="audio-controls">
+              <button type="button" class="btn-audio" id="btn-copy-confession">
+                Copy for Confession
+              </button>
+              <button type="button" class="btn-audio" id="btn-print-confession">
+                Print Pocket Guide
+              </button>
+            </div>
           </div>
 
           <article id="confession-reflection-body" class="reflection-prose"></article>

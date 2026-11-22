@@ -787,3 +787,43 @@ button:disabled {
   color: var(--text-muted);
   text-align: center;
 }
+
+/* Clean Pocket Print Layout (especially for Confession Prep Guide) */
+@media print {
+  .sanctuary-header,
+  .sources-column,
+  .mode-tabs,
+  .companion-intro,
+  .memory-dashboard,
+  .checkin-form,
+  .examen-form,
+  .starter-chips,
+  .telemetry-bar,
+  .voice-audio-player,
+  .sanctuary-footer {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .sanctuary-grid {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .panel-card,
+  .tab-panel {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  .reflection-prose {
+    font-size: 11pt !important;
+    line-height: 1.55 !important;
+  }
+}
