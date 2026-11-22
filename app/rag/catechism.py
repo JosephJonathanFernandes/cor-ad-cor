@@ -1,4 +1,4 @@
-"""FAISS vector store over Catechism of the Catholic Church paragraphs."""
+"""Direct FAISS vector store (with safe JSON metadata sidecar) over Catechism paragraphs."""
 
 from __future__ import annotations
 
@@ -9,9 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import faiss
 import numpy as np
-from langchain_community.vectorstores import FAISS
-from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
@@ -65,6 +64,14 @@ class CatechismHit:
     def citation(self) -> str:
         return f"CCC §{self.paragraph}"
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "paragraph": self.paragraph,
+            "section": self.section,
+            "text": self.text,
+            "source_type": self.source_type,
+        }
+
 
 def build_embeddings(
     provider: Literal["gemini", "local_hash"],
@@ -83,10 +90,10 @@ def build_embeddings(
     return LocalDeterministicEmbeddings()
 
 
-def load_ccc_documents(source_path: Path) -> list[Document]:
-    """Load CCC paragraphs from JSON into LangChain Documents with paragraph metadata."""
+def load_ccc_hits(source_path: Path) -> list[CatechismHit]:
+    """Load CCC paragraphs from JSON into typed CatechismHit objects."""
     raw = json.loads(source_path.read_text(encoding="utf-8"))
-    docs: list[Document] = []
+    hits: list[CatechismHit] = []
     for entry in raw:
         paragraph = int(entry["paragraph"])
         section = str(entry.get("section", "")).strip()
@@ -94,32 +101,21 @@ def load_ccc_documents(source_path: Path) -> list[Document]:
         source_type = str(entry.get("source_type", "official_text"))
         if not text:
             continue
-        page_content = f"CCC §{paragraph} — {section}\n{text}" if section else f"CCC §{paragraph}\n{text}"
-        docs.append(
-            Document(
-                page_content=page_content,
-                metadata={
-                    "paragraph": paragraph,
-                    "section": section,
-                    "raw_text": text,
-                    "source_type": source_type,
-                },
+        hits.append(
+            CatechismHit(
+                paragraph=paragraph,
+                section=section,
+                text=text,
+                source_type=source_type,
             )
         )
-    return docs
+    return hits
 
 
-_DIRECT_PARA_RE = re.compile(r"(?:ccc\s*§?\s*|§\s*|^)(\d{1,4})(?:\s*$|\b)", re.I)
-
-
-def _doc_to_hit(doc: Document) -> CatechismHit:
-    meta = doc.metadata
-    return CatechismHit(
-        paragraph=int(meta["paragraph"]),
-        section=str(meta.get("section", "")),
-        text=str(meta.get("raw_text", doc.page_content)),
-        source_type=str(meta.get("source_type", "seed_summary")),
-    )
+def _l2_normalize(matrix: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms = np.where(norms == 0.0, 1.0, norms)
+    return (matrix / norms).astype(np.float32)
 
 
 def _extract_direct_paragraph_numbers(query: str) -> list[int]:
@@ -138,17 +134,19 @@ def _extract_direct_paragraph_numbers(query: str) -> list[int]:
 
 
 class CatechismIndex:
-    """Manages building, saving, loading, exact lookup, and hybrid search over the CCC FAISS index."""
+    """Direct FAISS IndexFlatIP store with safe JSON metadata sidecar (no pickle)."""
 
-    def __init__(self, vector_store: FAISS) -> None:
-        self.vector_store = vector_store
-        self.paragraph_map: dict[int, CatechismHit] = {}
-        docstore_dict = getattr(vector_store.docstore, "_dict", None)
-        if isinstance(docstore_dict, dict):
-            for doc in docstore_dict.values():
-                if isinstance(doc, Document) and "paragraph" in doc.metadata:
-                    hit = _doc_to_hit(doc)
-                    self.paragraph_map[hit.paragraph] = hit
+    def __init__(
+        self,
+        *,
+        index: faiss.Index,
+        hits: list[CatechismHit],
+        embeddings: Embeddings,
+    ) -> None:
+        self.index = index
+        self.hits = hits
+        self.embeddings = embeddings
+        self.paragraph_map: dict[int, CatechismHit] = {h.paragraph: h for h in hits}
 
     def get_by_paragraph(self, paragraph: int) -> CatechismHit | None:
         """O(1) exact lookup of a Catechism paragraph by number (1–2865)."""
@@ -156,17 +154,30 @@ class CatechismIndex:
 
     @classmethod
     def build_from_json(cls, source_path: Path, embeddings: Embeddings) -> CatechismIndex:
-        """Build a fresh FAISS index from a CCC JSON file."""
-        docs = load_ccc_documents(source_path)
-        if not docs:
+        """Build a fresh cosine-similarity FAISS index from a CCC JSON file."""
+        hits = load_ccc_hits(source_path)
+        if not hits:
             raise ValueError(f"No CCC paragraphs found in {source_path}")
-        store = FAISS.from_documents(docs, embeddings)
-        return cls(store)
+
+        texts = [
+            f"CCC §{h.paragraph} — {h.section}\n{h.text}" if h.section else f"CCC §{h.paragraph}\n{h.text}"
+            for h in hits
+        ]
+        vectors = np.asarray(embeddings.embed_documents(texts), dtype=np.float32)
+        normalized = _l2_normalize(vectors)
+        index = faiss.IndexFlatIP(normalized.shape[1])
+        index.add(normalized)
+        return cls(index=index, hits=hits, embeddings=embeddings)
 
     def save(self, index_dir: Path) -> None:
-        """Persist FAISS index and metadata sidecar to disk."""
+        """Persist FAISS index and safe JSON metadata sidecar to disk."""
         index_dir.mkdir(parents=True, exist_ok=True)
-        self.vector_store.save_local(str(index_dir))
+        faiss.write_index(self.index, str(index_dir / "index.faiss"))
+        meta_payload = [h.to_dict() for h in self.hits]
+        (index_dir / "metadata.json").write_text(
+            json.dumps(meta_payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
 
     @classmethod
     def load_or_build(
@@ -176,16 +187,22 @@ class CatechismIndex:
         source_path: Path,
         embeddings: Embeddings,
     ) -> CatechismIndex:
-        """Load an existing FAISS index if present, otherwise build from JSON and save it."""
+        """Load an existing FAISS + JSON sidecar index if present, otherwise build and save it."""
         faiss_file = index_dir / "index.faiss"
-        pkl_file = index_dir / "index.pkl"
-        if faiss_file.exists() and pkl_file.exists():
-            store = FAISS.load_local(
-                str(index_dir),
-                embeddings,
-                allow_dangerous_deserialization=True,
-            )
-            return cls(store)
+        meta_file = index_dir / "metadata.json"
+        if faiss_file.exists() and meta_file.exists():
+            index = faiss.read_index(str(faiss_file))
+            raw_meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            hits = [
+                CatechismHit(
+                    paragraph=int(item["paragraph"]),
+                    section=str(item.get("section", "")),
+                    text=str(item["text"]),
+                    source_type=str(item.get("source_type", "official_text")),
+                )
+                for item in raw_meta
+            ]
+            return cls(index=index, hits=hits, embeddings=embeddings)
 
         instance = cls.build_from_json(source_path, embeddings)
         instance.save(index_dir)
@@ -194,7 +211,7 @@ class CatechismIndex:
     def search(self, query: str, k: int = 3) -> list[CatechismHit]:
         """Retrieve top-k CCC paragraphs using direct § lookup + hybrid FAISS/lexical fusion."""
         cleaned = query.strip()
-        if not cleaned:
+        if not cleaned or not self.hits:
             return []
 
         results: list[CatechismHit] = []
@@ -210,16 +227,19 @@ class CatechismIndex:
                     return results
 
         # 2. Vector FAISS candidate pool + lexical overlap Reciprocal Rank Fusion (RRF)
-        pool_size = min(max(k * 4, 12), max(len(self.paragraph_map), k))
-        vector_docs = self.vector_store.similarity_search(cleaned, k=pool_size)
-        query_tokens = {tok for tok in _TOKEN_RE.findall(cleaned.lower()) if len(tok) > 2}
+        pool_size = min(max(k * 4, 12), len(self.hits))
+        q_vec = np.asarray([self.embeddings.embed_query(cleaned)], dtype=np.float32)
+        q_norm = _l2_normalize(q_vec)
+        _, indices = self.index.search(q_norm, pool_size)
 
+        query_tokens = {tok for tok in _TOKEN_RE.findall(cleaned.lower()) if len(tok) > 2}
         scored: list[tuple[float, CatechismHit]] = []
-        for rank, doc in enumerate(vector_docs, start=1):
-            hit = _doc_to_hit(doc)
+        for rank, idx in enumerate(indices[0], start=1):
+            if idx < 0 or idx >= len(self.hits):
+                continue
+            hit = self.hits[idx]
             if hit.paragraph in seen:
                 continue
-            # Reciprocal rank score from FAISS + normalized lexical overlap bonus
             rrf_score = 1.0 / (20.0 + rank)
             if query_tokens:
                 doc_tokens = set(_TOKEN_RE.findall(f"{hit.section} {hit.text}".lower()))

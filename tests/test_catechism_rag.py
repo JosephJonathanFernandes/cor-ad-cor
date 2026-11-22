@@ -18,7 +18,7 @@ def test_build_save_reload_and_search_ccc_seed(tmp_path: Path) -> None:
         embeddings=embeddings,
     )
     assert (index_dir / "index.faiss").exists()
-    assert (index_dir / "index.pkl").exists()
+    assert (index_dir / "metadata.json").exists()
 
     reloaded = CatechismIndex.load_or_build(
         index_dir=index_dir,
