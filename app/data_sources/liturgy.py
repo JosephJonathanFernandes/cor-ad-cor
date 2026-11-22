@@ -359,6 +359,40 @@ def fetch_lectionary_citations(target_date: dt.date, timeout: float = 10.0) -> d
         return dict(data.get("readings") or {})
 
 
+def normalize_bible_api_reference(citation: str) -> str:
+    """Simplify complex lectionary citations (e.g. 'Psalm 23:1-2, 2-3, 5-6') into a clean span."""
+    cleaned = re.sub(r"\s+", " ", citation).strip()
+    # Extract book + chapter + all verse numbers in the first chapter block
+    match = re.match(r"^([1-3]?\s*[A-Za-z ]+?)\s+(\d+):([\d,\-\s]+)", cleaned)
+    if not match:
+        return cleaned
+    book = match.group(1).strip()
+    chapter = match.group(2)
+    verses = [int(v) for v in re.findall(r"\d+", match.group(3))]
+    if not verses:
+        return cleaned
+    return f"{book} {chapter}:{min(verses)}-{max(verses)}"
+
+
+def fetch_scripture_text(citation: str, timeout: float = 8.0) -> str:
+    """Hydrate full public-domain Scripture text for a lectionary citation via bible-api.com."""
+    candidates = [citation.strip()]
+    simplified = normalize_bible_api_reference(citation)
+    if simplified and simplified not in candidates:
+        candidates.append(simplified)
+
+    with httpx.Client(timeout=timeout, follow_redirects=True, headers={"User-Agent": _USER_AGENT}) as client:
+        for ref in candidates:
+            if not ref:
+                continue
+            resp = client.get(f"https://bible-api.com/{quote(ref)}")
+            if resp.status_code == 200:
+                text = str(resp.json().get("text") or "").strip()
+                if text:
+                    return re.sub(r"\n{2,}", "\n\n", text)
+    return ""
+
+
 def fetch_usccb_readings(target_date: dt.date, timeout: float = 12.0) -> tuple[str, list[Reading]]:
     """Fetch and parse daily Mass readings from USCCB."""
     slug = target_date.strftime("%m%d%y")
@@ -461,28 +495,38 @@ def get_liturgical_day(
     except Exception as exc:  # noqa: BLE001
         logger.warning("Vatican News fetch failed for %s: %s", resolved_date, exc)
 
-    # Enrich with Psalm / Second Reading citations from catholic-readings-api if present
+    # Enrich with Psalm / Second Reading full Scripture text (hydrated via bible-api.com)
     if readings:
         try:
             cites = fetch_lectionary_citations(resolved_date)
             existing_labels = {r.label.lower() for r in readings}
             if cites.get("psalm") and "responsorial psalm" not in existing_labels:
+                psalm_text = ""
+                try:
+                    psalm_text = fetch_scripture_text(cites["psalm"])
+                except Exception:  # noqa: BLE001
+                    psalm_text = ""
                 readings.insert(
                     1,
                     Reading(
                         label="Responsorial Psalm",
                         citation=cites["psalm"],
-                        text=f"Lectionary citation for today's Responsorial Psalm: {cites['psalm']}.",
+                        text=psalm_text or f"Lectionary citation for today's Responsorial Psalm: {cites['psalm']}.",
                     ),
                 )
             if cites.get("secondReading") and "second reading" not in existing_labels:
+                second_text = ""
+                try:
+                    second_text = fetch_scripture_text(cites["secondReading"])
+                except Exception:  # noqa: BLE001
+                    second_text = ""
                 insert_idx = max(len(readings) - 1, 1)
                 readings.insert(
                     insert_idx,
                     Reading(
                         label="Second Reading",
                         citation=cites["secondReading"],
-                        text=f"Lectionary citation for today's Second Reading: {cites['secondReading']}.",
+                        text=second_text or f"Lectionary citation for today's Second Reading: {cites['secondReading']}.",
                     ),
                 )
         except Exception as exc:  # noqa: BLE001
