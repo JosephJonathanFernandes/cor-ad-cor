@@ -109,11 +109,50 @@ def load_ccc_documents(source_path: Path) -> list[Document]:
     return docs
 
 
+_DIRECT_PARA_RE = re.compile(r"(?:ccc\s*§?\s*|§\s*|^)(\d{1,4})(?:\s*$|\b)", re.I)
+
+
+def _doc_to_hit(doc: Document) -> CatechismHit:
+    meta = doc.metadata
+    return CatechismHit(
+        paragraph=int(meta["paragraph"]),
+        section=str(meta.get("section", "")),
+        text=str(meta.get("raw_text", doc.page_content)),
+        source_type=str(meta.get("source_type", "seed_summary")),
+    )
+
+
+def _extract_direct_paragraph_numbers(query: str) -> list[int]:
+    """Detect explicit CCC paragraph numbers in a search query (e.g. '1374', 'CCC §2729')."""
+    stripped = query.strip()
+    if stripped.isdigit():
+        num = int(stripped)
+        return [num] if 1 <= num <= 2865 else []
+
+    found: list[int] = []
+    for match in re.finditer(r"(?:ccc\s*§?\s*|§\s*)(\d{1,4})\b", stripped, re.I):
+        num = int(match.group(1))
+        if 1 <= num <= 2865 and num not in found:
+            found.append(num)
+    return found
+
+
 class CatechismIndex:
-    """Manages building, saving, loading, and querying the CCC FAISS index."""
+    """Manages building, saving, loading, exact lookup, and hybrid search over the CCC FAISS index."""
 
     def __init__(self, vector_store: FAISS) -> None:
         self.vector_store = vector_store
+        self.paragraph_map: dict[int, CatechismHit] = {}
+        docstore_dict = getattr(vector_store.docstore, "_dict", None)
+        if isinstance(docstore_dict, dict):
+            for doc in docstore_dict.values():
+                if isinstance(doc, Document) and "paragraph" in doc.metadata:
+                    hit = _doc_to_hit(doc)
+                    self.paragraph_map[hit.paragraph] = hit
+
+    def get_by_paragraph(self, paragraph: int) -> CatechismHit | None:
+        """O(1) exact lookup of a Catechism paragraph by number (1–2865)."""
+        return self.paragraph_map.get(paragraph)
 
     @classmethod
     def build_from_json(cls, source_path: Path, embeddings: Embeddings) -> CatechismIndex:
@@ -153,19 +192,46 @@ class CatechismIndex:
         return instance
 
     def search(self, query: str, k: int = 3) -> list[CatechismHit]:
-        """Retrieve the top-k relevant CCC paragraphs for a query."""
-        if not query.strip():
+        """Retrieve top-k CCC paragraphs using direct § lookup + hybrid FAISS/lexical fusion."""
+        cleaned = query.strip()
+        if not cleaned:
             return []
-        docs = self.vector_store.similarity_search(query, k=k)
-        hits: list[CatechismHit] = []
-        for doc in docs:
-            meta = doc.metadata
-            hits.append(
-                CatechismHit(
-                    paragraph=int(meta["paragraph"]),
-                    section=str(meta.get("section", "")),
-                    text=str(meta.get("raw_text", doc.page_content)),
-                    source_type=str(meta.get("source_type", "seed_summary")),
-                )
-            )
-        return hits
+
+        results: list[CatechismHit] = []
+        seen: set[int] = set()
+
+        # 1. Exact paragraph number hits first (e.g., "1374", "CCC §2729")
+        for num in _extract_direct_paragraph_numbers(cleaned):
+            exact = self.get_by_paragraph(num)
+            if exact is not None and exact.paragraph not in seen:
+                results.append(exact)
+                seen.add(exact.paragraph)
+                if len(results) >= k:
+                    return results
+
+        # 2. Vector FAISS candidate pool + lexical overlap Reciprocal Rank Fusion (RRF)
+        pool_size = min(max(k * 4, 12), max(len(self.paragraph_map), k))
+        vector_docs = self.vector_store.similarity_search(cleaned, k=pool_size)
+        query_tokens = {tok for tok in _TOKEN_RE.findall(cleaned.lower()) if len(tok) > 2}
+
+        scored: list[tuple[float, CatechismHit]] = []
+        for rank, doc in enumerate(vector_docs, start=1):
+            hit = _doc_to_hit(doc)
+            if hit.paragraph in seen:
+                continue
+            # Reciprocal rank score from FAISS + normalized lexical overlap bonus
+            rrf_score = 1.0 / (20.0 + rank)
+            if query_tokens:
+                doc_tokens = set(_TOKEN_RE.findall(f"{hit.section} {hit.text}".lower()))
+                overlap = len(query_tokens & doc_tokens) / len(query_tokens)
+                rrf_score += 0.04 * overlap
+            scored.append((rrf_score, hit))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        for _, hit in scored:
+            if hit.paragraph not in seen:
+                results.append(hit)
+                seen.add(hit.paragraph)
+                if len(results) >= k:
+                    break
+        return results

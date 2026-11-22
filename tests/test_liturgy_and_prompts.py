@@ -98,7 +98,9 @@ def test_api_daily_and_checkin_and_crisis_guardrail(tmp_path: Path) -> None:
         assert daily.status_code == 200
         data = daily.json()
         assert data["llm"]["provider"] == "groq"
-        assert len(data["ccc_citations"]) == 3
+        assert len(data["ccc_citations"]) >= 3
+        assert any(c["paragraph"] == 2729 for c in data["ccc_citations"])
+        assert data["citation_verification"]["all_valid"] is True
         assert "5 Minutes Before Mass" in data["reflection"]
 
         checkin = client.post(
