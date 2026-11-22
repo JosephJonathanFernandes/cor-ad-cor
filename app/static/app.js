@@ -218,7 +218,9 @@ function renderLiturgy(liturgy) {
   els.celebration.textContent = liturgy.celebration_title || "Daily Mass";
   els.colorDot.dataset.colour = (liturgy.colour || "white").toLowerCase();
   els.sourceTag.textContent =
-    liturgy.source === "live" ? "Source: USCCB & CalAPI (Live)" : "Source: Offline Liturgical Fixture";
+    liturgy.source === "live"
+      ? "Source: Vatican News & CalAPI (Live)"
+      : "Source: Offline Liturgical Fixture";
 
   // Readings
   if (!liturgy.readings || liturgy.readings.length === 0) {
@@ -239,7 +241,14 @@ function renderLiturgy(liturgy) {
       .join("");
   }
 
-  // Saint
+  // Saint + optional Papal Reflection from Vatican News
+  const papalHtml = liturgy.papal_reflection
+    ? `<div style="margin-top:0.85rem; padding-top:0.75rem; border-top:1px solid var(--border-color);">
+         <div class="panel-eyebrow" style="margin-bottom:0.25rem;">Words of the Popes (Vatican News)</div>
+         <p style="margin:0; font-family:var(--font-serif); font-size:0.9rem; font-style:italic;">${escapeHtml(liturgy.papal_reflection.slice(0, 420))}${liturgy.papal_reflection.length > 420 ? "…" : ""}</p>
+       </div>`
+    : "";
+
   if (liturgy.saint && liturgy.saint.title) {
     const meta = [liturgy.saint.rank, liturgy.saint.colour ? `Color: ${liturgy.saint.colour}` : ""]
       .filter(Boolean)
@@ -248,9 +257,10 @@ function renderLiturgy(liturgy) {
       <h3 class="saint-title">${escapeHtml(liturgy.saint.title)}</h3>
       ${meta ? `<div class="saint-meta">${escapeHtml(meta)}</div>` : ""}
       <p style="margin:0; font-size:0.93rem;">${escapeHtml(liturgy.saint.summary)}</p>
+      ${papalHtml}
     `;
   } else {
-    els.saintBody.innerHTML = `<p class="muted-placeholder">Ferial weekday in ${escapeHtml(liturgy.season)}.</p>`;
+    els.saintBody.innerHTML = `<p class="muted-placeholder">Ferial weekday in ${escapeHtml(liturgy.season)}.</p>${papalHtml}`;
   }
 }
 
