@@ -297,6 +297,53 @@ def fetch_usccb_readings(target_date: dt.date, timeout: float = 12.0) -> tuple[s
         return parse_usccb_html(resp.text)
 
 
+def _strip_html(raw_html: str) -> str:
+    soup = BeautifulSoup(raw_html, "html.parser")
+    text = soup.get_text("\n", strip=True)
+    return re.sub(r"\n{2,}", "\n\n", text).strip()
+
+
+def parse_universalis_jsonp(raw_jsonp: str) -> tuple[str, list[Reading]]:
+    """Parse Universalis `jsonpmass.js` payload into a liturgical title and Mass readings."""
+    start = raw_jsonp.find("{")
+    end = raw_jsonp.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return "", []
+    payload = json.loads(raw_jsonp[start : end + 1])
+
+    title = _strip_html(str(payload.get("day", "")))
+    mapping = [
+        ("Mass_R1", "First Reading"),
+        ("Mass_Ps", "Responsorial Psalm"),
+        ("Mass_R2", "Second Reading"),
+        ("Mass_G", "Gospel"),
+    ]
+    readings: list[Reading] = []
+    for key, label in mapping:
+        section = payload.get(key)
+        if not isinstance(section, dict):
+            continue
+        citation = _strip_html(str(section.get("source", "")))
+        text = _strip_html(str(section.get("text", "")))
+        if text:
+            readings.append(Reading(label=label, citation=citation, text=text))
+    return title, readings
+
+
+def fetch_universalis_readings(target_date: dt.date, timeout: float = 12.0) -> tuple[str, list[Reading]]:
+    """Secondary live lectionary source via Universalis JSONP if USCCB is unreachable or changes HTML."""
+    slug = target_date.strftime("%Y%m%d")
+    url = f"https://universalis.com/{slug}/jsonpmass.js"
+    with httpx.Client(
+        timeout=timeout,
+        follow_redirects=True,
+        headers={"User-Agent": _USER_AGENT},
+    ) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        return parse_universalis_jsonp(resp.text)
+
+
 def get_liturgical_day(
     target_date: dt.date | None = None,
     *,
@@ -337,6 +384,14 @@ def get_liturgical_day(
             celebration_title = usccb_title
     except Exception as exc:  # noqa: BLE001
         logger.warning("USCCB fetch failed for %s: %s", resolved_date, exc)
+
+    if not readings:
+        try:
+            uni_title, readings = fetch_universalis_readings(resolved_date)
+            if uni_title and not celebration_title:
+                celebration_title = uni_title
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Universalis fallback fetch failed for %s: %s", resolved_date, exc)
 
     if not readings:
         logger.warning("Falling back to offline sample readings for %s.", resolved_date)
