@@ -16,6 +16,7 @@ const state = {
     lectio: "",
   },
   speakingTarget: null,
+  checkinHistory: [],
   timerSeconds: 180,
   timerRemaining: 180,
   timerInterval: null,
@@ -58,6 +59,7 @@ const els = {
   checkinRemember: document.getElementById("checkin-remember"),
   btnSubmitCheckin: document.getElementById("btn-submit-checkin"),
   btnPreviewCheckin: document.getElementById("btn-preview-checkin"),
+  btnResetCheckin: document.getElementById("btn-reset-checkin"),
   checkinTelemetry: document.getElementById("checkin-telemetry"),
   checkinProviderPill: document.getElementById("checkin-provider-pill"),
   checkinReflectionBody: document.getElementById("checkin-reflection-body"),
@@ -182,15 +184,36 @@ function highlightElement(targetEl) {
   setTimeout(() => targetEl.classList.remove("source-highlight"), 2200);
 }
 
-function handleCitationClick(event) {
+async function handleCitationClick(event) {
   const pill = event.target.closest(".citation-pill");
   if (!pill) return;
   const cite = (pill.dataset.cite || "").toLowerCase();
 
   if (cite.startsWith("ccc")) {
     const numMatch = cite.match(/\d+/);
-    const card = numMatch ? document.getElementById(`ccc-card-${numMatch[0]}`) : null;
-    highlightElement(card || document.getElementById("source-ccc"));
+    if (numMatch) {
+      const paraNum = numMatch[0];
+      let card = document.getElementById(`ccc-card-${paraNum}`);
+      if (!card) {
+        try {
+          const res = await fetch(`/api/v1/ccc/${paraNum}`);
+          if (res.ok) {
+            const item = await res.json();
+            const merged = [
+              item,
+              ...state.cccCitations.filter((c) => Number(c.paragraph) !== Number(item.paragraph)),
+            ];
+            renderCccList(merged);
+            card = document.getElementById(`ccc-card-${paraNum}`);
+          }
+        } catch {
+          // Fall back to scrolling to Catechism card
+        }
+      }
+      highlightElement(card || document.getElementById("source-ccc"));
+      return;
+    }
+    highlightElement(document.getElementById("source-ccc"));
     return;
   }
 
@@ -476,6 +499,7 @@ async function submitCheckin({ demo = false } = {}) {
         offline: state.offline,
         demo: useDemo,
         remember: Boolean(els.checkinRemember && els.checkinRemember.checked),
+        history: state.checkinHistory.slice(-6),
       }),
     });
     const data = await res.json();
@@ -488,9 +512,16 @@ async function submitCheckin({ demo = false } = {}) {
     els.checkinProviderPill.textContent = formatProviderBadge(data.llm, data.citation_verification);
 
     const rendered = renderReflectionHtml(data.reflection);
-    els.checkinReflectionBody.innerHTML = data.crisis_escalated
-      ? `<div class="crisis-alert-card">${rendered}</div>`
-      : rendered;
+    if (data.crisis_escalated) {
+      els.checkinReflectionBody.innerHTML = `<div class="crisis-alert-card">${rendered}</div>`;
+    } else {
+      state.checkinHistory.push({ role: "user", content: message });
+      state.checkinHistory.push({ role: "assistant", content: data.reflection });
+      if (els.btnResetCheckin) els.btnResetCheckin.hidden = false;
+      els.checkinInput.value = "";
+      els.checkinInput.placeholder = "Reply to the companion's question or share what stirred in you...";
+      els.checkinReflectionBody.innerHTML = rendered;
+    }
     await loadSeasonMemory();
   } catch (err) {
     els.checkinReflectionBody.innerHTML = `<div class="empty-sanctuary-state"><p>${escapeHtml(err.message)}</p></div>`;
@@ -556,7 +587,9 @@ async function loadSeasonMemory() {
     if (!res.ok) return;
     const data = await res.json();
     const total = data.total_entries || 0;
-    els.memorySummaryTitle.textContent = `Season Memory — ${data.season || "Ordinary Time"} (${total} saved reflection${total === 1 ? "" : "s"})`;
+    const days = data.distinct_days || 0;
+    const rhythm = days > 0 ? ` • ${days} day${days === 1 ? "" : "s"} prayed` : "";
+    els.memorySummaryTitle.textContent = `Season Memory — ${data.season || "Ordinary Time"} (${total} reflection${total === 1 ? "" : "s"}${rhythm})`;
 
     if (!data.top_themes || data.top_themes.length === 0) {
       els.memoryThemesBar.innerHTML = `<span class="muted-placeholder">No recurring themes recorded yet. Save a Check-In or Evening Examen to track season patterns.</span>`;
@@ -785,6 +818,17 @@ function bindEvents() {
     submitCheckin({ demo: false });
   });
   els.btnPreviewCheckin.addEventListener("click", () => submitCheckin({ demo: true }));
+  if (els.btnResetCheckin) {
+    els.btnResetCheckin.addEventListener("click", () => {
+      state.checkinHistory = [];
+      els.btnResetCheckin.hidden = true;
+      els.checkinInput.value = "";
+      els.checkinInput.placeholder =
+        "Write honestly in your own words (e.g., 'I'm exhausted today and struggling to trust God with...')";
+      els.checkinReflectionBody.innerHTML = "";
+      els.checkinTelemetry.hidden = true;
+    });
+  }
 
   els.examenForm.addEventListener("submit", (e) => {
     e.preventDefault();
