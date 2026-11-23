@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from app.config import Settings, get_settings
 from app.data_sources.prayers import list_prayers
 from app.data_sources.rosary import get_rosary_for_date
+from app.data_sources.seasons import get_season_guide
 from app.delivery.audio import (
     VoiceNoteSynthesizer,
     estimate_duration_seconds,
@@ -84,6 +85,16 @@ class LectioRequest(BaseModel):
     date: dt.date | None = None
     offline: bool = False
     demo: bool = False
+
+
+class BookmarkCreateRequest(BaseModel):
+    """Payload for saving a favorite companion reflection to local bookmarks."""
+
+    liturgical_date: str = Field(..., min_length=4, max_length=32)
+    category: str = Field(..., min_length=2, max_length=40)
+    title: str = Field(..., min_length=2, max_length=200)
+    content: str = Field(..., min_length=5, max_length=12000)
+    ccc_citations: list[str] = Field(default_factory=list)
 
 
 def _serialize_ccc_hits(hits: list[CatechismHit]) -> list[dict[str, Any]]:
@@ -198,6 +209,7 @@ def create_app(
         day, ccc_hits = service.liturgy_context(target_date=date, offline=offline)
         return {
             "liturgy": day.model_dump(),
+            "season_guide": get_season_guide(day.season, day.colour).to_dict(),
             "ccc_citations": _serialize_ccc_hits(ccc_hits),
         }
 
@@ -358,6 +370,40 @@ def create_app(
             content=payload,
             headers={"Content-Disposition": 'attachment; filename="cor_ad_cor_journal.json"'},
         )
+
+    @application.get("/api/v1/bookmarks")
+    def list_saved_bookmarks(
+        service: CompanionService = Depends(get_service),
+    ) -> dict[str, Any]:
+        bookmarks = service.journal.list_bookmarks()
+        return {
+            "total": len(bookmarks),
+            "bookmarks": [asdict(b) for b in bookmarks],
+        }
+
+    @application.post("/api/v1/bookmarks")
+    def create_saved_bookmark(
+        payload: BookmarkCreateRequest,
+        service: CompanionService = Depends(get_service),
+    ) -> dict[str, Any]:
+        entry = service.journal.add_bookmark(
+            liturgical_date=payload.liturgical_date,
+            category=payload.category,
+            title=payload.title,
+            content=payload.content,
+            ccc_citations=payload.ccc_citations,
+        )
+        return asdict(entry)
+
+    @application.delete("/api/v1/bookmarks/{bookmark_id}")
+    def delete_saved_bookmark(
+        bookmark_id: int,
+        service: CompanionService = Depends(get_service),
+    ) -> dict[str, Any]:
+        removed = service.journal.delete_bookmark(bookmark_id)
+        if not removed:
+            raise HTTPException(status_code=404, detail=f"Bookmark {bookmark_id} not found.")
+        return {"status": "deleted", "id": bookmark_id}
 
     @application.post("/api/v1/lectio")
     def post_lectio_divina(

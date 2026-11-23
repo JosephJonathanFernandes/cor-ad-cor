@@ -98,6 +98,10 @@ const els = {
   btnTimerToggle: document.getElementById("btn-timer-toggle"),
   btnTimerReset: document.getElementById("btn-timer-reset"),
   timerStatus: document.getElementById("timer-status"),
+  marianAntiphonTitle: document.getElementById("marian-antiphon-title"),
+  marianAntiphonText: document.getElementById("marian-antiphon-text"),
+  bookmarksTitle: document.getElementById("bookmarks-title"),
+  bookmarksList: document.getElementById("bookmarks-list"),
 };
 
 function escapeHtml(text) {
@@ -361,6 +365,7 @@ async function loadLiturgyContext() {
   if (litRes.ok) {
     const data = await litRes.json();
     renderLiturgy(data.liturgy);
+    renderSeasonGuide(data.season_guide);
     renderCccList(data.ccc_citations);
   }
   if (rosRes.ok) {
@@ -917,6 +922,7 @@ function bindEvents() {
 
   document.body.addEventListener("click", handleCitationClick);
   document.body.addEventListener("click", handleAudioClick);
+  document.body.addEventListener("click", handleBookmarkClick);
 }
 
 async function handleAudioClick(event) {
@@ -998,6 +1004,106 @@ async function handleAudioClick(event) {
   }
 }
 
+function renderSeasonGuide(guide) {
+  if (!guide) return;
+  if (els.colorDot && guide.colour_meaning) {
+    els.colorDot.title = guide.colour_meaning;
+  }
+  if (els.season && guide.spiritual_focus) {
+    els.season.title = guide.spiritual_focus;
+  }
+  if (els.marianAntiphonTitle && guide.marian_antiphon_title) {
+    els.marianAntiphonTitle.textContent = guide.marian_antiphon_title;
+  }
+  if (els.marianAntiphonText && guide.marian_antiphon_text) {
+    els.marianAntiphonText.textContent = guide.marian_antiphon_text;
+  }
+}
+
+async function loadBookmarks() {
+  if (!els.bookmarksList) return;
+  try {
+    const res = await fetch("/api/v1/bookmarks");
+    if (!res.ok) return;
+    const data = await res.json();
+    const list = data.bookmarks || [];
+    if (els.bookmarksTitle) {
+      els.bookmarksTitle.textContent = `Saved Reflections (${list.length})`;
+    }
+    if (list.length === 0) {
+      els.bookmarksList.innerHTML = `<p class="muted-placeholder">Click "Save Reflection" on any briefing, check-in, Examen, or Lectio Divina to keep it here.</p>`;
+      return;
+    }
+    els.bookmarksList.innerHTML = list
+      .map(
+        (b) => `
+        <details class="reading-item">
+          <summary>
+            <span>${escapeHtml(b.title)}</span>
+            <span class="reading-citation">${escapeHtml(b.liturgical_date)} &bull; ${escapeHtml(b.category)}</span>
+          </summary>
+          <div class="reading-text">
+            <div style="margin-bottom:0.6rem;">${renderReflectionHtml(b.content)}</div>
+            <button type="button" class="btn-ghost btn-delete-bookmark" data-bookmark-id="${b.id}">
+              Remove Bookmark
+            </button>
+          </div>
+        </details>
+      `
+      )
+      .join("");
+  } catch {
+    // Non-blocking
+  }
+}
+
+async function handleBookmarkClick(event) {
+  const saveBtn = event.target.closest(".btn-bookmark");
+  if (saveBtn) {
+    const target = saveBtn.dataset.bookmarkTarget;
+    const content = (state.reflections[target] || "").trim();
+    if (!content) return;
+    const labelMap = {
+      daily: "5 Minutes Before Mass",
+      checkin: "Personal Check-In",
+      examen: "Evening Ignatian Examen",
+      lectio: "Lectio Divina",
+    };
+    const title = `${labelMap[target] || "Reflection"} — ${state.liturgy?.celebration_title || state.date}`;
+    saveBtn.disabled = true;
+    try {
+      const res = await fetch("/api/v1/bookmarks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          liturgical_date: state.date,
+          category: target,
+          title,
+          content,
+          ccc_citations: state.cccCitations.map((c) => c.citation),
+        }),
+      });
+      if (res.ok) {
+        saveBtn.textContent = "Saved ✓";
+        await loadBookmarks();
+        setTimeout(() => {
+          saveBtn.textContent = "Save Reflection";
+        }, 2000);
+      }
+    } finally {
+      saveBtn.disabled = false;
+    }
+    return;
+  }
+
+  const delBtn = event.target.closest(".btn-delete-bookmark");
+  if (delBtn) {
+    const id = delBtn.dataset.bookmarkId;
+    await fetch(`/api/v1/bookmarks/${id}`, { method: "DELETE" });
+    await loadBookmarks();
+  }
+}
+
 async function loadPrayers() {
   if (!els.prayersList) return;
   try {
@@ -1036,6 +1142,7 @@ async function init() {
   await checkEngineHealth();
   await loadLiturgyContext();
   await loadSeasonMemory();
+  await loadBookmarks();
   await loadPrayers();
 }
 

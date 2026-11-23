@@ -215,6 +215,9 @@
               <button type="button" class="btn-audio" data-audio-target="daily" data-audio-action="mp3">
                 Download MP3
               </button>
+              <button type="button" class="btn-audio btn-bookmark" data-bookmark-target="daily">
+                Save Reflection
+              </button>
             </div>
           </div>
           <audio id="daily-audio-player" class="voice-audio-player" controls hidden></audio>
@@ -289,6 +292,9 @@
               <button type="button" class="btn-audio" data-audio-target="checkin" data-audio-action="mp3">
                 Download MP3
               </button>
+              <button type="button" class="btn-audio btn-bookmark" data-bookmark-target="checkin">
+                Save Reflection
+              </button>
             </div>
           </div>
           <audio id="checkin-audio-player" class="voice-audio-player" controls hidden></audio>
@@ -360,11 +366,20 @@
               <button type="button" class="btn-audio" data-audio-target="examen" data-audio-action="mp3">
                 Download MP3
               </button>
+              <button type="button" class="btn-audio btn-bookmark" data-bookmark-target="examen">
+                Save Reflection
+              </button>
             </div>
           </div>
           <audio id="examen-audio-player" class="voice-audio-player" controls hidden></audio>
 
           <article id="examen-reflection-body" class="reflection-prose"></article>
+
+          <div class="memory-dashboard" id="marian-antiphon-card" style="margin-top:1.4rem;">
+            <span class="panel-eyebrow">Compline Seasonal Antiphon</span>
+            <h3 class="memory-title" id="marian-antiphon-title">Salve Regina</h3>
+            <p id="marian-antiphon-text" style="margin:0.45rem 0 0; font-family:var(--font-serif); font-size:0.93rem; font-style:italic;"></p>
+          </div>
         </div>
 
         <!-- TAB 4: Season Continuity & Gentle Confession Prep -->
@@ -431,6 +446,18 @@
           </div>
 
           <article id="confession-reflection-body" class="reflection-prose"></article>
+
+          <div class="memory-dashboard" id="bookmarks-dashboard" style="margin-top:1.4rem;">
+            <div class="memory-header">
+              <div>
+                <span class="panel-eyebrow">Spiritual Treasury</span>
+                <h3 class="memory-title" id="bookmarks-title">Saved Reflections (0)</h3>
+              </div>
+            </div>
+            <div id="bookmarks-list" class="readings-list">
+              <p class="muted-placeholder">Click "Save Reflection" on any briefing, check-in, Examen, or Lectio Divina to keep it here.</p>
+            </div>
+          </div>
         </div>
 
         <!-- TAB 5: Guided Lectio Divina & Quiet Contemplation Timer -->
@@ -472,6 +499,9 @@
               </button>
               <button type="button" class="btn-audio" data-audio-target="lectio" data-audio-action="mp3">
                 Download MP3
+              </button>
+              <button type="button" class="btn-audio btn-bookmark" data-bookmark-target="lectio">
+                Save Reflection
               </button>
             </div>
           </div>

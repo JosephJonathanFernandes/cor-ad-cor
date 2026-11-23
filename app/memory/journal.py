@@ -67,6 +67,19 @@ class JournalEntry:
 
 
 @dataclass(frozen=True)
+class BookmarkEntry:
+    """A saved companion reflection bookmarked by the user for later prayer."""
+
+    id: int
+    created_at: str
+    liturgical_date: str
+    category: str
+    title: str
+    content: str
+    ccc_citations: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class SeasonMemorySummary:
     """Aggregated spiritual continuity patterns across a liturgical season."""
 
@@ -127,6 +140,19 @@ class JournalStore:
                     consolation TEXT NOT NULL DEFAULT '',
                     desolation TEXT NOT NULL DEFAULT '',
                     themes_json TEXT NOT NULL DEFAULT '[]',
+                    ccc_citations_json TEXT NOT NULL DEFAULT '[]'
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bookmarks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    liturgical_date TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
                     ccc_citations_json TEXT NOT NULL DEFAULT '[]'
                 )
                 """
@@ -252,3 +278,71 @@ class JournalStore:
             cursor = conn.execute("DELETE FROM journal_entries")
             conn.commit()
             return int(cursor.rowcount or 0)
+
+    def add_bookmark(
+        self,
+        *,
+        liturgical_date: str,
+        category: str,
+        title: str,
+        content: str,
+        ccc_citations: list[str] | None = None,
+    ) -> BookmarkEntry:
+        """Save a meaningful reflection to the user's local spiritual treasury."""
+        now_iso = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+        citations = ccc_citations or []
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO bookmarks (
+                    created_at, liturgical_date, category, title, content, ccc_citations_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    now_iso,
+                    liturgical_date.strip(),
+                    category.strip(),
+                    title.strip(),
+                    content.strip(),
+                    json.dumps(citations),
+                ),
+            )
+            conn.commit()
+            bookmark_id = int(cursor.lastrowid or 0)
+        return BookmarkEntry(
+            id=bookmark_id,
+            created_at=now_iso,
+            liturgical_date=liturgical_date.strip(),
+            category=category.strip(),
+            title=title.strip(),
+            content=content.strip(),
+            ccc_citations=citations,
+        )
+
+    def list_bookmarks(self, *, limit: int = 50) -> list[BookmarkEntry]:
+        """Return saved reflections ordered newest first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM bookmarks ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [
+            BookmarkEntry(
+                id=int(row["id"]),
+                created_at=str(row["created_at"]),
+                liturgical_date=str(row["liturgical_date"]),
+                category=str(row["category"]),
+                title=str(row["title"]),
+                content=str(row["content"]),
+                ccc_citations=json.loads(row["ccc_citations_json"] or "[]"),
+            )
+            for row in rows
+        ]
+
+    def delete_bookmark(self, bookmark_id: int) -> bool:
+        """Remove a single saved bookmark by ID."""
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM bookmarks WHERE id = ?", (bookmark_id,))
+            conn.commit()
+            return int(cursor.rowcount or 0) > 0

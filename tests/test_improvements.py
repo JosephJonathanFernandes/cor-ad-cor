@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.data_sources.liturgy import clean_saint_query, parse_vatican_news_html
+from app.data_sources.seasons import get_season_guide
 from app.llm.router import GroqGeminiRouter
 from app.main import create_app
 from app.rag.catechism import CatechismIndex, LocalDeterministicEmbeddings
@@ -172,3 +173,34 @@ def test_exact_ccc_endpoint_multiturn_checkin_and_rhythm_stats(tmp_path: Path) -
         assert prayers.status_code == 200
         titles = [p["title"] for p in prayers.json()["prayers"]]
         assert any("Suscipe" in t for t in titles)
+
+        # Seasonal guide + Marian Antiphon
+        lent_guide = get_season_guide("Lent", "violet")
+        assert lent_guide.season_key == "lent"
+        assert "Ave Regina" in lent_guide.marian_antiphon_title
+        assert "Violet" in lent_guide.colour_meaning
+
+        easter_guide = get_season_guide("Easter", "white")
+        assert "Regina Caeli" in easter_guide.marian_antiphon_title
+
+        # Bookmarks CRUD
+        created = client.post(
+            "/api/v1/bookmarks",
+            json={
+                "liturgical_date": "2026-11-23",
+                "category": "daily",
+                "title": "Christ the King Reflection",
+                "content": "Grounded reflection [Gospel] [CCC §2729].",
+                "ccc_citations": ["CCC §2729"],
+            },
+        )
+        assert created.status_code == 200
+        bm_id = created.json()["id"]
+
+        listed = client.get("/api/v1/bookmarks")
+        assert listed.status_code == 200
+        assert listed.json()["total"] == 1
+
+        deleted = client.delete(f"/api/v1/bookmarks/{bm_id}")
+        assert deleted.status_code == 200
+        assert client.get("/api/v1/bookmarks").json()["total"] == 0
