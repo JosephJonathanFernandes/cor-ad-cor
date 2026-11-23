@@ -225,3 +225,11 @@ def test_exact_ccc_endpoint_multiturn_checkin_and_rhythm_stats(tmp_path: Path) -
         )
         assert imported.status_code == 200
         assert imported.json()["imported_entries"] == 1
+
+        # Liturgical Month Calendar endpoint
+        cal = client.get("/api/v1/calendar", params={"year": 2026, "month": 11, "offline": True})
+        assert cal.status_code == 200
+        cal_data = cal.json()
+        assert cal_data["month_name"] == "November"
+        assert len(cal_data["days"]) == 30
+        assert any("All Saints" in d["title"] for d in cal_data["days"])

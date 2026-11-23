@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
+from app.data_sources.calendar_view import get_liturgical_month
 from app.data_sources.prayers import list_prayers
 from app.data_sources.rosary import get_rosary_for_date
 from app.data_sources.seasons import get_season_guide
@@ -225,6 +226,21 @@ def create_app(
             "moment": moment or "all",
             "prayers": [p.to_dict() for p in prayers],
         }
+
+    @application.get("/api/v1/calendar")
+    def get_calendar_month(
+        year: int | None = Query(default=None, ge=1970, le=2100),
+        month: int | None = Query(default=None, ge=1, le=12),
+        offline: bool = Query(default=False),
+        service: CompanionService = Depends(get_service),
+    ) -> dict[str, Any]:
+        today = dt.date.today()
+        return get_liturgical_month(
+            year or today.year,
+            month or today.month,
+            cache_dir=service.settings.data_dir / "cache",
+            offline=offline,
+        )
 
     @application.get("/api/v1/daily")
     def get_daily_briefing(

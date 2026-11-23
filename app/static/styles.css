@@ -664,6 +664,47 @@ button:disabled {
   font-style: italic;
 }
 
+/* Liturgical Month Calendar */
+.calendar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.calendar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.65rem;
+  border-radius: 7px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-page);
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 0.83rem;
+  cursor: pointer;
+}
+
+.calendar-row:hover {
+  border-color: var(--accent-primary);
+  background: var(--bg-accent-soft);
+}
+
+.calendar-row.active-day {
+  border-color: var(--accent-primary);
+  font-weight: 700;
+}
+
+.calendar-date-label {
+  min-width: 58px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
 /* Telemetry & Reflection Prose */
 .telemetry-bar {
   display: flex;

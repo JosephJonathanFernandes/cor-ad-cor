@@ -105,6 +105,8 @@ const els = {
   btnListenReadings: document.getElementById("btn-listen-readings"),
   cccCountHint: document.getElementById("ccc-count-hint"),
   journalImportInput: document.getElementById("journal-import-input"),
+  calendarMonthTitle: document.getElementById("calendar-month-title"),
+  calendarList: document.getElementById("calendar-list"),
 };
 
 function escapeHtml(text) {
@@ -378,6 +380,42 @@ async function loadLiturgyContext() {
   if (rosRes.ok) {
     const rosary = await rosRes.json();
     renderRosary(rosary);
+  }
+  await loadCalendarMonth();
+}
+
+async function loadCalendarMonth() {
+  if (!els.calendarList) return;
+  const [y, m] = state.date.split("-").map(Number);
+  try {
+    const params = new URLSearchParams({
+      year: String(y),
+      month: String(m),
+      offline: String(state.offline),
+    });
+    const res = await fetch(`/api/v1/calendar?${params}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (els.calendarMonthTitle) {
+      els.calendarMonthTitle.textContent = `${data.month_name} ${data.year} — Feasts & Sundays`;
+    }
+    // Show Sundays, Solemnities, Feasts, and the currently selected date
+    const highlights = (data.days || []).filter(
+      (d) => d.is_major || d.date === state.date || d.rank === "memorial"
+    );
+    els.calendarList.innerHTML = highlights
+      .map(
+        (d) => `
+        <button type="button" class="calendar-row ${d.date === state.date ? "active-day" : ""}" data-cal-date="${escapeHtml(d.date)}">
+          <span class="liturgy-dot" data-colour="${escapeHtml(d.colour || "green")}"></span>
+          <span class="calendar-date-label">${escapeHtml(d.weekday)} ${d.day}</span>
+          <span style="flex:1;">${escapeHtml(d.title)}</span>
+        </button>
+      `
+      )
+      .join("");
+  } catch {
+    // Non-blocking
   }
 }
 
@@ -930,6 +968,13 @@ function bindEvents() {
   document.body.addEventListener("click", handleCitationClick);
   document.body.addEventListener("click", handleAudioClick);
   document.body.addEventListener("click", handleBookmarkClick);
+  document.body.addEventListener("click", (e) => {
+    const row = e.target.closest(".calendar-row");
+    if (!row || !row.dataset.calDate) return;
+    state.date = row.dataset.calDate;
+    els.dateInput.value = state.date;
+    loadLiturgyContext();
+  });
 
   if (els.btnListenReadings) {
     els.btnListenReadings.addEventListener("click", () => {
