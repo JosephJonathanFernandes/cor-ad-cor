@@ -116,6 +116,15 @@
             <button type="submit" class="btn-secondary">Search CCC</button>
           </form>
 
+          <div class="starter-chips" style="margin:0 0 0.85rem;" aria-label="Quick Catechism topics">
+            <button type="button" class="chip-btn ccc-topic-chip" data-ccc-query="real presence Eucharist 1374">Eucharist</button>
+            <button type="button" class="chip-btn ccc-topic-chip" data-ccc-query="penance reconciliation interior repentance 1431">Confession &amp; Mercy</button>
+            <button type="button" class="chip-btn ccc-topic-chip" data-ccc-query="dryness distraction battle of prayer 2729">Prayer Dryness</button>
+            <button type="button" class="chip-btn ccc-topic-chip" data-ccc-query="providence evil redemptive suffering cross 309">Suffering &amp; Cross</button>
+            <button type="button" class="chip-btn ccc-topic-chip" data-ccc-query="moral conscience sanctuary voice of God 1776">Conscience</button>
+            <button type="button" class="chip-btn ccc-topic-chip" data-ccc-query="communion of saints intercession Mary 956">Mary &amp; Saints</button>
+          </div>
+
           <div id="ccc-list" class="ccc-list">
             <p class="muted-placeholder">Loading matched Catechism paragraphs...</p>
           </div>
@@ -132,6 +141,18 @@
           </div>
           <div id="rosary-list" class="readings-list">
             <p class="muted-placeholder">Loading Rosary mysteries...</p>
+          </div>
+
+          <div class="bead-tracker" id="rosary-bead-tracker" aria-label="Interactive Rosary Decade Counter">
+            <div class="bead-header">
+              <strong id="bead-decade-label">Decade 1 of 5</strong>
+              <span id="bead-step-label" class="panel-hint">Our Father (0 / 10 Hail Marys)</span>
+            </div>
+            <div class="bead-row" id="bead-row"></div>
+            <div class="action-row" style="justify-content:space-between; margin-top:0.6rem;">
+              <button type="button" class="btn-primary" id="btn-next-bead">Next Bead</button>
+              <button type="button" class="btn-ghost" id="btn-reset-beads">Reset Rosary</button>
+            </div>
           </div>
         </div>
 

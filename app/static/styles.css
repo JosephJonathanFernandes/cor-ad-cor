@@ -734,6 +734,53 @@ button:disabled {
   font-size: 0.78rem;
 }
 
+/* Interactive Rosary Bead Counter */
+.bead-tracker {
+  margin-top: 0.95rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 9px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-page);
+}
+
+.bead-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+  font-size: 0.86rem;
+}
+
+.bead-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.35rem 0;
+}
+
+.bead-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--border-color);
+  background: var(--bg-surface);
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.bead-dot.bead-of {
+  width: 22px;
+  height: 22px;
+  border-color: var(--accent-gold);
+}
+
+.bead-dot.prayed {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  transform: scale(1.06);
+}
+
 /* Telemetry & Reflection Prose */
 .telemetry-bar {
   display: flex;

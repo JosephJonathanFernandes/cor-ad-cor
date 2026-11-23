@@ -20,6 +20,8 @@ const state = {
   timerSeconds: 180,
   timerRemaining: 180,
   timerInterval: null,
+  rosaryDecade: 1,
+  rosaryBead: 0, // 0=Our Father, 1..10=Hail Marys, 11=Glory Be
 };
 
 const els = {
@@ -107,6 +109,11 @@ const els = {
   journalImportInput: document.getElementById("journal-import-input"),
   calendarMonthTitle: document.getElementById("calendar-month-title"),
   calendarList: document.getElementById("calendar-list"),
+  beadDecadeLabel: document.getElementById("bead-decade-label"),
+  beadStepLabel: document.getElementById("bead-step-label"),
+  beadRow: document.getElementById("bead-row"),
+  btnNextBead: document.getElementById("btn-next-bead"),
+  btnResetBeads: document.getElementById("btn-reset-beads"),
 };
 
 function escapeHtml(text) {
@@ -985,6 +992,30 @@ function bindEvents() {
     btn.addEventListener("click", () => switchSourceTab(btn.dataset.sourceTab));
   });
 
+  document.querySelectorAll(".ccc-topic-chip").forEach((chip) => {
+    chip.addEventListener("click", async () => {
+      const q = chip.dataset.cccQuery || "";
+      if (!q) return;
+      els.cccSearchInput.value = chip.textContent.trim();
+      const res = await fetch(`/api/v1/ccc/search?${new URLSearchParams({ q, k: "4" })}`);
+      if (res.ok) {
+        const data = await res.json();
+        renderCccList(data.results);
+      }
+    });
+  });
+
+  if (els.btnNextBead) {
+    els.btnNextBead.addEventListener("click", advanceRosaryBead);
+  }
+  if (els.btnResetBeads) {
+    els.btnResetBeads.addEventListener("click", () => {
+      state.rosaryDecade = 1;
+      state.rosaryBead = 0;
+      renderRosaryBeads();
+    });
+  }
+
   document.body.addEventListener("click", async (e) => {
     const shareBtn = e.target.closest(".btn-share");
     if (!shareBtn) return;
@@ -1286,9 +1317,44 @@ async function loadPrayers() {
   }
 }
 
+function renderRosaryBeads() {
+  if (!els.beadRow) return;
+  els.beadDecadeLabel.textContent = `Decade ${state.rosaryDecade} of 5`;
+  if (state.rosaryBead === 0) {
+    els.beadStepLabel.textContent = "Our Father (0 / 10 Hail Marys)";
+  } else if (state.rosaryBead <= 10) {
+    els.beadStepLabel.textContent = `Hail Mary ${state.rosaryBead} of 10`;
+  } else {
+    els.beadStepLabel.textContent = "Glory Be & Fatima Prayer";
+  }
+
+  const beads = [];
+  for (let i = 0; i <= 10; i += 1) {
+    const cls = i === 0 ? "bead-dot bead-of" : "bead-dot";
+    const prayed = state.rosaryBead > i ? " prayed" : "";
+    beads.push(`<span class="${cls}${prayed}" title="${i === 0 ? "Our Father" : `Hail Mary ${i}`}"></span>`);
+  }
+  els.beadRow.innerHTML = beads.join("");
+}
+
+function advanceRosaryBead() {
+  if (state.rosaryBead < 11) {
+    state.rosaryBead += 1;
+  } else if (state.rosaryDecade < 5) {
+    state.rosaryDecade += 1;
+    state.rosaryBead = 0;
+  } else {
+    playGentleChime();
+    state.rosaryDecade = 1;
+    state.rosaryBead = 0;
+  }
+  renderRosaryBeads();
+}
+
 async function init() {
   bindEvents();
   renderTimer();
+  renderRosaryBeads();
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/static/sw.js").catch(() => {});
   }
