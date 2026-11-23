@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from app.data_sources.liturgy import LiturgicalDay
+from app.data_sources.seasons import get_season_guide
 from app.rag.catechism import CatechismHit
 
 COMPANION_SYSTEM_PROMPT = """You are "Cor ad Cor", a compassionate Catholic spiritual companion.
@@ -47,9 +48,10 @@ def detect_distress_signal(text: str) -> bool:
 
 
 def _format_liturgy_context(day: LiturgicalDay) -> str:
+    season_guide = get_season_guide(day.season, day.colour)
     lines = [
         f"Date: {day.date}",
-        f"Liturgical Season: {day.season}",
+        f"Liturgical Season: {season_guide.display_name} — {season_guide.spiritual_focus}",
         f"Celebration: {day.celebration_title or 'Weekday'}",
     ]
     if day.saint:
