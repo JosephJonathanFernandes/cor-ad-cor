@@ -58,7 +58,9 @@
             <span class="panel-eyebrow">Lectionary</span>
             <h2 class="panel-title">Today's Mass Readings</h2>
           </div>
-          <span class="panel-hint">Click any citation pill to jump here</span>
+          <button type="button" class="btn-audio" id="btn-listen-readings" title="Listen to today's Mass readings aloud">
+            Listen to Readings
+          </button>
         </div>
         <div id="readings-list" class="readings-list">
           <p class="muted-placeholder">Loading readings...</p>
@@ -83,6 +85,7 @@
             <span class="panel-eyebrow">Magisterial Anchor (FAISS RAG)</span>
             <h2 class="panel-title">Catechism of the Catholic Church</h2>
           </div>
+          <span class="panel-hint" id="ccc-count-hint"></span>
         </div>
 
         <form id="ccc-search-form" class="ccc-search-bar">
@@ -400,8 +403,12 @@
               </div>
               <div class="action-row">
                 <a href="/api/v1/memory/export" class="btn-ghost" download="cor_ad_cor_journal.json" style="text-decoration:none;">
-                  Export Journal (JSON)
+                  Export JSON
                 </a>
+                <label class="btn-ghost" style="cursor:pointer;">
+                  Import JSON
+                  <input type="file" id="journal-import-input" accept="application/json" hidden />
+                </label>
                 <button type="button" id="btn-clear-memory" class="btn-ghost" title="Delete all stored local reflections (e.g., after Confession)">
                   Wipe Memory (Clean Slate)
                 </button>

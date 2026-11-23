@@ -196,6 +196,7 @@ def create_app(
             "gemini_fallback_configured": bool(settings.gemini_api_key.strip()),
             "embedding_provider": settings.resolved_embedding_provider(),
             "ccc_index_ready": (settings.ccc_index_dir / "index.faiss").exists(),
+            "ccc_paragraphs_indexed": len(service.ccc_index.paragraph_map),
             "telegram_configured": bool(settings.telegram_bot_token.strip()),
             "tts_voice": settings.tts_voice,
         }
@@ -370,6 +371,33 @@ def create_app(
             content=payload,
             headers={"Content-Disposition": 'attachment; filename="cor_ad_cor_journal.json"'},
         )
+
+    @application.post("/api/v1/memory/import")
+    def import_season_memory(
+        payload: dict[str, Any],
+        service: CompanionService = Depends(get_service),
+    ) -> dict[str, Any]:
+        raw_entries = payload.get("entries")
+        if not isinstance(raw_entries, list):
+            raise HTTPException(status_code=422, detail="Expected JSON object with an 'entries' list.")
+        imported = 0
+        for item in raw_entries[:500]:
+            if not isinstance(item, dict):
+                continue
+            entry_type = item.get("entry_type", "checkin")
+            if entry_type not in ("checkin", "examen"):
+                entry_type = "checkin"
+            service.journal.add_entry(
+                liturgical_date=str(item.get("liturgical_date") or dt.date.today().isoformat()),
+                season=str(item.get("season") or "Ordinary Time"),
+                entry_type=entry_type,
+                user_note=str(item.get("user_note") or ""),
+                consolation=str(item.get("consolation") or ""),
+                desolation=str(item.get("desolation") or ""),
+                ccc_citations=list(item.get("ccc_citations") or []),
+            )
+            imported += 1
+        return {"status": "imported", "imported_entries": imported}
 
     @application.get("/api/v1/bookmarks")
     def list_saved_bookmarks(

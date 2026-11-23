@@ -102,6 +102,9 @@ const els = {
   marianAntiphonText: document.getElementById("marian-antiphon-text"),
   bookmarksTitle: document.getElementById("bookmarks-title"),
   bookmarksList: document.getElementById("bookmarks-list"),
+  btnListenReadings: document.getElementById("btn-listen-readings"),
+  cccCountHint: document.getElementById("ccc-count-hint"),
+  journalImportInput: document.getElementById("journal-import-input"),
 };
 
 function escapeHtml(text) {
@@ -340,6 +343,10 @@ async function checkEngineHealth() {
     const groqCount = data.groq_keys_configured || 0;
     const hasGemini = Boolean(data.gemini_fallback_configured);
     state.hasLiveKeys = groqCount > 0 || hasGemini;
+
+    if (els.cccCountHint && data.ccc_paragraphs_indexed) {
+      els.cccCountHint.textContent = `${data.ccc_paragraphs_indexed.toLocaleString()} paragraphs indexed`;
+    }
 
     if (state.hasLiveKeys) {
       els.engineStatus.textContent = `Groq (${groqCount} key${groqCount === 1 ? "" : "s"})${hasGemini ? " + Gemini Fallback" : ""}`;
@@ -923,6 +930,70 @@ function bindEvents() {
   document.body.addEventListener("click", handleCitationClick);
   document.body.addEventListener("click", handleAudioClick);
   document.body.addEventListener("click", handleBookmarkClick);
+
+  if (els.btnListenReadings) {
+    els.btnListenReadings.addEventListener("click", () => {
+      if (!("speechSynthesis" in window)) return;
+      if (state.speakingTarget === "readings" && window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+        state.speakingTarget = null;
+        els.btnListenReadings.textContent = "Listen to Readings";
+        return;
+      }
+      const readings = state.liturgy?.readings || [];
+      if (!readings.length) return;
+      const script = readings
+        .map((r) => `${r.label}. ${r.citation}. ${r.text}`)
+        .join("\n\n");
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(script);
+      utterance.rate = 0.92;
+      utterance.onend = () => {
+        state.speakingTarget = null;
+        els.btnListenReadings.textContent = "Listen to Readings";
+      };
+      state.speakingTarget = "readings";
+      els.btnListenReadings.textContent = "Stop Readings";
+      window.speechSynthesis.speak(utterance);
+    });
+  }
+
+  if (els.journalImportInput) {
+    els.journalImportInput.addEventListener("change", async () => {
+      const file = els.journalImportInput.files?.[0];
+      if (!file) return;
+      try {
+        const parsed = JSON.parse(await file.text());
+        const res = await fetch("/api/v1/memory/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(parsed),
+        });
+        if (res.ok) {
+          await loadSeasonMemory();
+        }
+      } catch {
+        alert("Invalid journal backup JSON file.");
+      } finally {
+        els.journalImportInput.value = "";
+      }
+    });
+  }
+
+  // Keyboard shortcuts: 1-5 to switch tabs when not typing, Alt+T for Evening Vigil mode
+  document.addEventListener("keydown", (e) => {
+    const tag = (e.target?.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return;
+    if (e.altKey && e.key.toLowerCase() === "t") {
+      e.preventDefault();
+      els.themeToggle.click();
+      return;
+    }
+    const tabMap = { "1": "daily", "2": "checkin", "3": "examen", "4": "confession", "5": "lectio" };
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && tabMap[e.key]) {
+      switchTab(tabMap[e.key]);
+    }
+  });
 }
 
 async function handleAudioClick(event) {

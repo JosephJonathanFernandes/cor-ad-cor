@@ -204,3 +204,24 @@ def test_exact_ccc_endpoint_multiturn_checkin_and_rhythm_stats(tmp_path: Path) -
         deleted = client.delete(f"/api/v1/bookmarks/{bm_id}")
         assert deleted.status_code == 200
         assert client.get("/api/v1/bookmarks").json()["total"] == 0
+
+        # Health CCC count + Journal JSON import round-trip
+        health = client.get("/health")
+        assert health.status_code == 200
+        assert health.json()["ccc_paragraphs_indexed"] >= 20
+
+        imported = client.post(
+            "/api/v1/memory/import",
+            json={
+                "entries": [
+                    {
+                        "liturgical_date": "2026-11-23",
+                        "season": "Ordinary Time",
+                        "entry_type": "checkin",
+                        "user_note": "Restored gratitude note",
+                    }
+                ]
+            },
+        )
+        assert imported.status_code == 200
+        assert imported.json()["imported_entries"] == 1
