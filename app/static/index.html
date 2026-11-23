@@ -50,93 +50,116 @@
   </header>
 
   <main class="sanctuary-grid">
-    <!-- LEFT COLUMN: Sacred Sources (Lectionary, Saint, Catechism) -->
+    <!-- LEFT COLUMN: Sacred Sources (Tabbed Sanctuary Sources) -->
     <section class="sources-column" aria-label="Liturgical and Catechism Sources">
-      <div class="panel-card">
-        <div class="panel-header">
-          <div>
-            <span class="panel-eyebrow">Lectionary</span>
-            <h2 class="panel-title">Today's Mass Readings</h2>
+      <div class="source-tabs" role="tablist" aria-label="Source Categories">
+        <button type="button" role="tab" class="source-tab active" data-source-tab="readings" aria-selected="true">
+          Readings &amp; Saint
+        </button>
+        <button type="button" role="tab" class="source-tab" data-source-tab="catechism" aria-selected="false">
+          Catechism
+        </button>
+        <button type="button" role="tab" class="source-tab" data-source-tab="devotions" aria-selected="false">
+          Rosary &amp; Prayers
+        </button>
+        <button type="button" role="tab" class="source-tab" data-source-tab="calendar" aria-selected="false">
+          Calendar
+        </button>
+      </div>
+
+      <div class="source-pane" data-source-pane="readings">
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <span class="panel-eyebrow">Lectionary</span>
+              <h2 class="panel-title">Today's Mass Readings</h2>
+            </div>
+            <button type="button" class="btn-audio" id="btn-listen-readings" title="Listen to today's Mass readings aloud">
+              Listen to Readings
+            </button>
           </div>
-          <button type="button" class="btn-audio" id="btn-listen-readings" title="Listen to today's Mass readings aloud">
-            Listen to Readings
-          </button>
+          <div id="readings-list" class="readings-list">
+            <p class="muted-placeholder">Loading readings...</p>
+          </div>
         </div>
-        <div id="readings-list" class="readings-list">
-          <p class="muted-placeholder">Loading readings...</p>
+
+        <div class="panel-card" id="source-saint" style="margin-top:1.1rem;">
+          <div class="panel-header">
+            <div>
+              <span class="panel-eyebrow">Communion of Saints</span>
+              <h2 class="panel-title">Saint &amp; Feast of the Day</h2>
+            </div>
+          </div>
+          <div id="saint-body" class="saint-body">
+            <p class="muted-placeholder">Loading saint information...</p>
+          </div>
         </div>
       </div>
 
-      <div class="panel-card" id="source-saint">
-        <div class="panel-header">
-          <div>
-            <span class="panel-eyebrow">Communion of Saints</span>
-            <h2 class="panel-title">Saint &amp; Feast of the Day</h2>
+      <div class="source-pane" data-source-pane="catechism" hidden>
+        <div class="panel-card" id="source-ccc">
+          <div class="panel-header">
+            <div>
+              <span class="panel-eyebrow">Magisterial Anchor (FAISS RAG)</span>
+              <h2 class="panel-title">Catechism of the Catholic Church</h2>
+            </div>
+            <span class="panel-hint" id="ccc-count-hint"></span>
           </div>
-        </div>
-        <div id="saint-body" class="saint-body">
-          <p class="muted-placeholder">Loading saint information...</p>
+
+          <form id="ccc-search-form" class="ccc-search-bar">
+            <input
+              type="search"
+              id="ccc-search-input"
+              placeholder="Search CCC themes or paragraph # (e.g., 1374, dryness, mercy)..."
+              aria-label="Search Catechism"
+            />
+            <button type="submit" class="btn-secondary">Search CCC</button>
+          </form>
+
+          <div id="ccc-list" class="ccc-list">
+            <p class="muted-placeholder">Loading matched Catechism paragraphs...</p>
+          </div>
         </div>
       </div>
 
-      <div class="panel-card" id="source-ccc">
-        <div class="panel-header">
-          <div>
-            <span class="panel-eyebrow">Magisterial Anchor (FAISS RAG)</span>
-            <h2 class="panel-title">Catechism of the Catholic Church</h2>
+      <div class="source-pane" data-source-pane="devotions" hidden>
+        <div class="panel-card" id="source-rosary">
+          <div class="panel-header">
+            <div>
+              <span class="panel-eyebrow" id="rosary-weekday-eyebrow">Daily Rosary</span>
+              <h2 class="panel-title" id="rosary-set-title">Today's Rosary Mysteries</h2>
+            </div>
           </div>
-          <span class="panel-hint" id="ccc-count-hint"></span>
+          <div id="rosary-list" class="readings-list">
+            <p class="muted-placeholder">Loading Rosary mysteries...</p>
+          </div>
         </div>
 
-        <form id="ccc-search-form" class="ccc-search-bar">
-          <input
-            type="search"
-            id="ccc-search-input"
-            placeholder="Search CCC themes or paragraph # (e.g., 1374, dryness, mercy)..."
-            aria-label="Search Catechism"
-          />
-          <button type="submit" class="btn-secondary">Search CCC</button>
-        </form>
-
-        <div id="ccc-list" class="ccc-list">
-          <p class="muted-placeholder">Loading matched Catechism paragraphs...</p>
+        <div class="panel-card" id="source-prayers" style="margin-top:1.1rem;">
+          <div class="panel-header">
+            <div>
+              <span class="panel-eyebrow">Offline Treasury</span>
+              <h2 class="panel-title">Classic Catholic Prayers</h2>
+            </div>
+          </div>
+          <div id="prayers-list" class="readings-list">
+            <p class="muted-placeholder">Loading prayers...</p>
+          </div>
         </div>
       </div>
 
-      <div class="panel-card" id="source-rosary">
-        <div class="panel-header">
-          <div>
-            <span class="panel-eyebrow" id="rosary-weekday-eyebrow">Daily Rosary</span>
-            <h2 class="panel-title" id="rosary-set-title">Today's Rosary Mysteries</h2>
+      <div class="source-pane" data-source-pane="calendar" hidden>
+        <div class="panel-card" id="source-calendar">
+          <div class="panel-header">
+            <div>
+              <span class="panel-eyebrow">Liturgical Year</span>
+              <h2 class="panel-title" id="calendar-month-title">Month Feasts &amp; Sundays</h2>
+            </div>
+            <span class="panel-hint">Click any day to open</span>
           </div>
-        </div>
-        <div id="rosary-list" class="readings-list">
-          <p class="muted-placeholder">Loading Rosary mysteries...</p>
-        </div>
-      </div>
-
-      <div class="panel-card" id="source-prayers">
-        <div class="panel-header">
-          <div>
-            <span class="panel-eyebrow">Offline Treasury</span>
-            <h2 class="panel-title">Classic Catholic Prayers</h2>
+          <div id="calendar-list" class="calendar-list">
+            <p class="muted-placeholder">Loading liturgical month...</p>
           </div>
-        </div>
-        <div id="prayers-list" class="readings-list">
-          <p class="muted-placeholder">Loading prayers...</p>
-        </div>
-      </div>
-
-      <div class="panel-card" id="source-calendar">
-        <div class="panel-header">
-          <div>
-            <span class="panel-eyebrow">Liturgical Year</span>
-            <h2 class="panel-title" id="calendar-month-title">Month Feasts &amp; Sundays</h2>
-          </div>
-          <span class="panel-hint">Click any day to open</span>
-        </div>
-        <div id="calendar-list" class="calendar-list">
-          <p class="muted-placeholder">Loading liturgical month...</p>
         </div>
       </div>
     </section>
@@ -233,6 +256,9 @@
               </button>
               <button type="button" class="btn-audio btn-bookmark" data-bookmark-target="daily">
                 Save Reflection
+              </button>
+              <button type="button" class="btn-audio btn-share" data-share-target="daily">
+                Share
               </button>
             </div>
           </div>
@@ -522,6 +548,9 @@
               </button>
               <button type="button" class="btn-audio btn-bookmark" data-bookmark-target="lectio">
                 Save Reflection
+              </button>
+              <button type="button" class="btn-audio btn-share" data-share-target="lectio">
+                Share
               </button>
             </div>
           </div>

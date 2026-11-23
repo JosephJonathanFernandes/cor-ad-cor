@@ -194,12 +194,24 @@ function highlightElement(targetEl) {
   setTimeout(() => targetEl.classList.remove("source-highlight"), 2200);
 }
 
+function switchSourceTab(target) {
+  document.querySelectorAll(".source-tab").forEach((btn) => {
+    const active = btn.dataset.sourceTab === target;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll(".source-pane").forEach((pane) => {
+    pane.hidden = pane.dataset.sourcePane !== target;
+  });
+}
+
 async function handleCitationClick(event) {
   const pill = event.target.closest(".citation-pill");
   if (!pill) return;
   const cite = (pill.dataset.cite || "").toLowerCase();
 
   if (cite.startsWith("ccc")) {
+    switchSourceTab("catechism");
     const numMatch = cite.match(/\d+/);
     if (numMatch) {
       const paraNum = numMatch[0];
@@ -227,6 +239,7 @@ async function handleCitationClick(event) {
     return;
   }
 
+  switchSourceTab("readings");
   if (cite === "saint") {
     highlightElement(document.getElementById("source-saint"));
     return;
@@ -968,11 +981,35 @@ function bindEvents() {
   document.body.addEventListener("click", handleCitationClick);
   document.body.addEventListener("click", handleAudioClick);
   document.body.addEventListener("click", handleBookmarkClick);
+  document.querySelectorAll(".source-tab").forEach((btn) => {
+    btn.addEventListener("click", () => switchSourceTab(btn.dataset.sourceTab));
+  });
+
+  document.body.addEventListener("click", async (e) => {
+    const shareBtn = e.target.closest(".btn-share");
+    if (!shareBtn) return;
+    const target = shareBtn.dataset.shareTarget;
+    const text = (state.reflections[target] || "").trim();
+    if (!text) return;
+    const title = `Cor ad Cor — ${state.liturgy?.celebration_title || state.date} (${state.date})`;
+    const sharePayload = `${title}\n\n${text.replace(/#{1,6}\s*/g, "").replace(/\*\*/g, "")}`;
+    try {
+      await navigator.clipboard.writeText(sharePayload);
+      shareBtn.textContent = "Copied to Share ✓";
+      setTimeout(() => {
+        shareBtn.textContent = "Share";
+      }, 2000);
+    } catch {
+      alert("Could not copy automatically. Please copy the reflection text directly.");
+    }
+  });
+
   document.body.addEventListener("click", (e) => {
     const row = e.target.closest(".calendar-row");
     if (!row || !row.dataset.calDate) return;
     state.date = row.dataset.calDate;
     els.dateInput.value = state.date;
+    switchSourceTab("readings");
     loadLiturgyContext();
   });
 
