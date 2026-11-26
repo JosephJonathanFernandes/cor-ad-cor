@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from app.data_sources.hours import get_prayer_for_hour
 from app.data_sources.prayers import list_prayers
 from app.data_sources.rosary import get_rosary_for_date
 from app.delivery.audio import VoiceNoteSynthesizer
@@ -26,6 +27,7 @@ WELCOME_MESSAGE = (
     "• /examen gratitude | consolation | desolation — 3-Minute Evening Ignatian Examen\n"
     "• /confession [optional focus] — Gentle Examination of Conscience & Confession prep\n"
     "• /rosary — Today's 5 Rosary Mysteries with Fruits & CCC anchors\n"
+    "• /angelus — The Angelus (or Regina Caeli in Easter) & Gospel Canticle for this hour\n"
     "• /prayer [morning|evening|trust|confession|eucharist] — Classic Catholic prayers\n"
     "• /ccc <topic> — Search the Catechism of the Catholic Church\n"
     "• /wipe — Clear your saved local season memory (Clean Slate)\n\n"
@@ -182,6 +184,20 @@ class TelegramCompanionBot:
                     f"   {m.intention}"
                 )
             return BotAction(chat_id=chat_id, text="\n".join(lines))
+
+        if lower.startswith("/angelus"):
+            import datetime as dt
+
+            day = self.service.get_day(offline=self.offline)
+            hp = get_prayer_for_hour(dt.datetime.now().hour, season=day.season)
+            return BotAction(
+                chat_id=chat_id,
+                text=(
+                    f"{hp.label} — {hp.marian_devotion_title}\n\n"
+                    f"{hp.marian_devotion_text}\n\n"
+                    f"— {hp.canticle_title} ({hp.canticle_citation}) —\n{hp.canticle_text}"
+                ),
+            )
 
         if lower.startswith("/prayer"):
             moment = raw_text[len("/prayer") :].strip() or None
