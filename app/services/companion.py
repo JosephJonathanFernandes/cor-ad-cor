@@ -283,6 +283,89 @@ class CompanionService:
             saved_entry_id=saved_id,
         )
 
+    def stream_personal_checkin(
+        self,
+        *,
+        user_message: str,
+        target_date: dt.date | None = None,
+        offline: bool = False,
+        ccc_k: int = 3,
+        demo: bool = False,
+        remember: bool = False,
+        history: list[dict[str, str]] | None = None,
+    ):
+        """Yield ('context' | 'chunk' | 'done', payload) SSE events for personal check-ins."""
+        day = self.get_day(target_date, offline=offline)
+
+        if detect_distress_signal(user_message):
+            ccc_hits = self.ccc_index.search("human life sacred dignity despair hope", k=2)
+            yield "context", (day, ccc_hits)
+            yield "done", CompanionReply(
+                liturgy=day,
+                ccc_hits=ccc_hits,
+                reflection=PASTORAL_CRISIS_RESPONSE,
+                llm=None,
+                crisis_escalated=True,
+            )
+            return
+
+        combined_query = f"{user_message}\n\n{day.theme_query()}"
+        ccc_hits = self.ccc_index.search(combined_query, k=ccc_k)
+        yield "context", (day, ccc_hits)
+
+        memory_ctx = self.journal.season_summary(season=day.season).prompt_context()
+        saved_id: int | None = None
+        if remember:
+            entry = self.journal.add_entry(
+                liturgical_date=day.date,
+                season=day.season,
+                entry_type="checkin",
+                user_note=user_message,
+                ccc_citations=[h.citation for h in ccc_hits],
+            )
+            saved_id = entry.id
+
+        if demo:
+            full_text = build_preview_checkin_reflection(user_message, day, ccc_hits)
+            words = full_text.split(" ")
+            step = 10
+            for idx in range(0, len(words), step):
+                chunk = " ".join(words[idx : idx + step])
+                if idx + step < len(words):
+                    chunk += " "
+                yield "chunk", chunk
+            yield "done", self._finalize_reply(
+                liturgy=day,
+                ccc_hits=ccc_hits,
+                reflection=full_text,
+                llm=_preview_llm_result(),
+                saved_entry_id=saved_id,
+            )
+            return
+
+        prompt = build_checkin_prompt(
+            user_message,
+            day,
+            ccc_hits,
+            memory_context=memory_ctx,
+            history=history,
+        )
+        accumulated: list[str] = []
+        last_meta: LLMResult | None = None
+        for piece, meta in self.router.stream(COMPANION_SYSTEM_PROMPT, prompt, temperature=0.45):
+            accumulated.append(piece)
+            last_meta = meta
+            yield "chunk", piece
+
+        full_text = "".join(accumulated).strip()
+        yield "done", self._finalize_reply(
+            liturgy=day,
+            ccc_hits=ccc_hits,
+            reflection=full_text,
+            llm=last_meta,
+            saved_entry_id=saved_id,
+        )
+
     def evening_examen(
         self,
         *,

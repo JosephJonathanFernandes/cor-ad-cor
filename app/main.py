@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
 from app.data_sources.calendar_view import get_liturgical_month
+from app.data_sources.hours import get_prayer_for_hour
 from app.data_sources.prayers import list_prayers
 from app.data_sources.rosary import get_rosary_for_date
 from app.data_sources.seasons import get_season_guide
@@ -227,6 +228,14 @@ def create_app(
             "prayers": [p.to_dict() for p in prayers],
         }
 
+    @application.get("/api/v1/hours")
+    def get_liturgical_hour_prayer(
+        hour: int | None = Query(default=None, ge=0, le=23),
+        season: str = Query(default="Ordinary Time"),
+    ) -> dict[str, Any]:
+        resolved_hour = hour if hour is not None else dt.datetime.now().hour
+        return get_prayer_for_hour(resolved_hour, season=season).to_dict()
+
     @application.get("/api/v1/calendar")
     def get_calendar_month(
         year: int | None = Query(default=None, ge=1970, le=2100),
@@ -306,6 +315,41 @@ def create_app(
         except AllProvidersExhaustedError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return _serialize_reply(reply)
+
+    @application.post("/api/v1/checkin/stream")
+    def stream_checkin(
+        payload: CheckInRequest,
+        service: CompanionService = Depends(get_service),
+    ) -> StreamingResponse:
+        def event_stream():
+            try:
+                for event_name, item in service.stream_personal_checkin(
+                    user_message=payload.message,
+                    target_date=payload.date,
+                    offline=payload.offline,
+                    demo=payload.demo,
+                    remember=payload.remember,
+                    history=[turn.model_dump() for turn in payload.history],
+                ):
+                    if event_name == "context":
+                        day, hits = item
+                        body = {
+                            "liturgy": day.model_dump(),
+                            "ccc_citations": _serialize_ccc_hits(hits),
+                        }
+                    elif event_name == "chunk":
+                        body = {"delta": item}
+                    else:
+                        body = _serialize_reply(item)
+                    yield f"event: {event_name}\ndata: {json.dumps(body, ensure_ascii=False)}\n\n"
+            except AllProvidersExhaustedError as exc:
+                yield f"event: error\ndata: {json.dumps({'detail': str(exc)})}\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @application.post("/api/v1/examen")
     def post_examen(

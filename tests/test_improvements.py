@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.data_sources.hours import get_prayer_for_hour
 from app.data_sources.liturgy import clean_saint_query, parse_vatican_news_html
 from app.data_sources.seasons import get_season_guide
 from app.llm.router import GroqGeminiRouter
@@ -233,3 +234,35 @@ def test_exact_ccc_endpoint_multiturn_checkin_and_rhythm_stats(tmp_path: Path) -
         assert cal_data["month_name"] == "November"
         assert len(cal_data["days"]) == 30
         assert any("All Saints" in d["title"] for d in cal_data["days"])
+
+        # Liturgy of the Hours + Angelus / Regina Caeli seasonal switch
+        morning_ord = get_prayer_for_hour(8, season="Ordinary Time")
+        assert morning_ord.hour_key == "lauds"
+        assert "Benedictus" in morning_ord.canticle_title
+        assert morning_ord.marian_devotion_title == "The Angelus"
+
+        night_easter = get_prayer_for_hour(22, season="Easter Time")
+        assert night_easter.hour_key == "compline"
+        assert "Nunc Dimittis" in night_easter.canticle_title
+        assert "Regina Caeli" in night_easter.marian_devotion_title
+
+        hour_api = client.get("/api/v1/hours", params={"hour": 12, "season": "Easter"})
+        assert hour_api.status_code == 200
+        assert "Regina Caeli" in hour_api.json()["marian_devotion_title"]
+
+        # SSE Check-In stream
+        with client.stream(
+            "POST",
+            "/api/v1/checkin/stream",
+            json={
+                "message": "I am tired tonight and grateful for rest.",
+                "date": "2026-11-26",
+                "offline": True,
+                "demo": True,
+            },
+        ) as stream_resp:
+            assert stream_resp.status_code == 200
+            stream_body = "".join(stream_resp.iter_text())
+        assert "event: context" in stream_body
+        assert "event: chunk" in stream_body
+        assert "event: done" in stream_body

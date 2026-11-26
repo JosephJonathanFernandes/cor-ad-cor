@@ -32,6 +32,10 @@
           Checking engine...
         </div>
 
+        <button type="button" class="btn-ghost" id="btn-hour-prayer" title="Open the Gospel Canticle &amp; Angelus for this hour">
+          Hour Prayer
+        </button>
+
         <button type="button" class="btn-ghost" id="theme-toggle" aria-label="Toggle evening mode">
           Evening Vigil
         </button>
@@ -45,6 +49,21 @@
         <span class="liturgy-divider">&bull;</span>
         <strong class="liturgy-celebration" id="liturgy-celebration">Loading today's liturgy...</strong>
         <span class="liturgy-source-tag" id="liturgy-source-tag"></span>
+      </div>
+    </div>
+
+    <div class="hour-drawer" id="hour-prayer-drawer" hidden>
+      <div class="hour-drawer-inner">
+        <div class="hour-card">
+          <span class="panel-eyebrow" id="hour-canticle-eyebrow">Gospel Canticle</span>
+          <h3 class="saint-title" id="hour-canticle-title">Canticle</h3>
+          <p class="ccc-text" id="hour-canticle-text"></p>
+        </div>
+        <div class="hour-card">
+          <span class="panel-eyebrow">Marian Devotion of the Season</span>
+          <h3 class="saint-title" id="hour-devotion-title">The Angelus</h3>
+          <p class="ccc-text" id="hour-devotion-text" style="white-space:pre-line;"></p>
+        </div>
       </div>
     </div>
   </header>

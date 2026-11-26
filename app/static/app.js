@@ -114,6 +114,13 @@ const els = {
   beadRow: document.getElementById("bead-row"),
   btnNextBead: document.getElementById("btn-next-bead"),
   btnResetBeads: document.getElementById("btn-reset-beads"),
+  btnHourPrayer: document.getElementById("btn-hour-prayer"),
+  hourPrayerDrawer: document.getElementById("hour-prayer-drawer"),
+  hourCanticleEyebrow: document.getElementById("hour-canticle-eyebrow"),
+  hourCanticleTitle: document.getElementById("hour-canticle-title"),
+  hourCanticleText: document.getElementById("hour-canticle-text"),
+  hourDevotionTitle: document.getElementById("hour-devotion-title"),
+  hourDevotionText: document.getElementById("hour-devotion-text"),
 };
 
 function escapeHtml(text) {
@@ -396,6 +403,7 @@ async function loadLiturgyContext() {
     renderLiturgy(data.liturgy);
     renderSeasonGuide(data.season_guide);
     renderCccList(data.ccc_citations);
+    await loadHourPrayer(data.liturgy?.season || "Ordinary Time");
   }
   if (rosRes.ok) {
     const rosary = await rosRes.json();
@@ -549,6 +557,25 @@ async function generateDailyBriefing({ demo = false } = {}) {
   }
 }
 
+async function loadHourPrayer(season) {
+  if (!els.btnHourPrayer) return;
+  try {
+    const hour = new Date().getHours();
+    const params = new URLSearchParams({ hour: String(hour), season: season || "Ordinary Time" });
+    const res = await fetch(`/api/v1/hours?${params}`);
+    if (!res.ok) return;
+    const hp = await res.json();
+    els.btnHourPrayer.textContent = hp.label || "Hour Prayer";
+    els.hourCanticleEyebrow.textContent = `${hp.label} • ${hp.canticle_citation}`;
+    els.hourCanticleTitle.textContent = hp.canticle_title;
+    els.hourCanticleText.textContent = hp.canticle_text;
+    els.hourDevotionTitle.textContent = hp.marian_devotion_title;
+    els.hourDevotionText.textContent = hp.marian_devotion_text;
+  } catch {
+    // Non-blocking
+  }
+}
+
 async function submitCheckin({ demo = false } = {}) {
   const message = els.checkinInput.value.trim();
   if (message.length < 2) {
@@ -560,40 +587,76 @@ async function submitCheckin({ demo = false } = {}) {
   els.btnPreviewCheckin.disabled = true;
   els.checkinReflectionBody.innerHTML = `<p class="muted-placeholder">Sitting prayerfully with what you shared and today's readings...</p>`;
 
+  const payload = {
+    message,
+    date: state.date,
+    offline: state.offline,
+    demo: useDemo,
+    remember: Boolean(els.checkinRemember && els.checkinRemember.checked),
+    history: state.checkinHistory.slice(-6),
+  };
+
   try {
-    const res = await fetch("/api/v1/checkin", {
+    const res = await fetch("/api/v1/checkin/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message,
-        date: state.date,
-        offline: state.offline,
-        demo: useDemo,
-        remember: Boolean(els.checkinRemember && els.checkinRemember.checked),
-        history: state.checkinHistory.slice(-6),
-      }),
+      body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.detail || "Could not complete check-in.");
+    if (!res.ok || !res.body) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || "Could not complete check-in.");
     }
-    renderCccList(data.ccc_citations);
-    state.reflections.checkin = data.reflection;
-    els.checkinTelemetry.hidden = false;
-    els.checkinProviderPill.textContent = formatProviderBadge(data.llm, data.citation_verification);
 
-    const rendered = renderReflectionHtml(data.reflection);
-    if (data.crisis_escalated) {
-      els.checkinReflectionBody.innerHTML = `<div class="crisis-alert-card">${rendered}</div>`;
-    } else {
-      state.checkinHistory.push({ role: "user", content: message });
-      state.checkinHistory.push({ role: "assistant", content: data.reflection });
-      if (els.btnResetCheckin) els.btnResetCheckin.hidden = false;
-      els.checkinInput.value = "";
-      els.checkinInput.placeholder = "Reply to the companion's question or share what stirred in you...";
-      els.checkinReflectionBody.innerHTML = rendered;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let streamedText = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop() || "";
+
+      for (const block of blocks) {
+        const eventMatch = block.match(/^event:\s*(\S+)/m);
+        const dataMatch = block.match(/^data:\s*(.+)$/m);
+        if (!eventMatch || !dataMatch) continue;
+        const evtName = eventMatch[1];
+        const evtData = JSON.parse(dataMatch[1]);
+
+        if (evtName === "context") {
+          renderCccList(evtData.ccc_citations);
+        } else if (evtName === "chunk") {
+          streamedText += evtData.delta || "";
+          els.checkinReflectionBody.innerHTML = renderReflectionHtml(streamedText);
+        } else if (evtName === "done") {
+          renderCccList(evtData.ccc_citations);
+          state.reflections.checkin = evtData.reflection;
+          els.checkinTelemetry.hidden = false;
+          els.checkinProviderPill.textContent = formatProviderBadge(
+            evtData.llm,
+            evtData.citation_verification
+          );
+          const rendered = renderReflectionHtml(evtData.reflection);
+          if (evtData.crisis_escalated) {
+            els.checkinReflectionBody.innerHTML = `<div class="crisis-alert-card">${rendered}</div>`;
+          } else {
+            state.checkinHistory.push({ role: "user", content: message });
+            state.checkinHistory.push({ role: "assistant", content: evtData.reflection });
+            if (els.btnResetCheckin) els.btnResetCheckin.hidden = false;
+            els.checkinInput.value = "";
+            els.checkinInput.placeholder =
+              "Reply to the companion's question or share what stirred in you...";
+            els.checkinReflectionBody.innerHTML = rendered;
+          }
+          await loadSeasonMemory();
+        } else if (evtName === "error") {
+          throw new Error(evtData.detail || "Streaming error.");
+        }
+      }
     }
-    await loadSeasonMemory();
   } catch (err) {
     els.checkinReflectionBody.innerHTML = `<div class="empty-sanctuary-state"><p>${escapeHtml(err.message)}</p></div>`;
   } finally {
@@ -872,6 +935,12 @@ function bindEvents() {
     html.dataset.theme = next;
     els.themeToggle.textContent = next === "dark" ? "Morning Light" : "Evening Vigil";
   });
+
+  if (els.btnHourPrayer && els.hourPrayerDrawer) {
+    els.btnHourPrayer.addEventListener("click", () => {
+      els.hourPrayerDrawer.hidden = !els.hourPrayerDrawer.hidden;
+    });
+  }
 
   els.tabDaily.addEventListener("click", () => switchTab("daily"));
   els.tabCheckin.addEventListener("click", () => switchTab("checkin"));
