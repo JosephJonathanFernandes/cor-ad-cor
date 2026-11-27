@@ -171,6 +171,51 @@ class CompanionService:
             llm=result,
         )
 
+    def _stream_from_prompt(
+        self,
+        *,
+        day: LiturgicalDay,
+        ccc_hits: list[CatechismHit],
+        prompt: str,
+        preview_text: str,
+        demo: bool,
+        temperature: float,
+        saved_entry_id: int | None = None,
+    ):
+        """Shared generator emitting ('context' | 'chunk' | 'done', payload) SSE tuples."""
+        yield "context", (day, ccc_hits)
+        if demo:
+            words = preview_text.split(" ")
+            step = 10
+            for idx in range(0, len(words), step):
+                chunk = " ".join(words[idx : idx + step])
+                if idx + step < len(words):
+                    chunk += " "
+                yield "chunk", chunk
+            yield "done", self._finalize_reply(
+                liturgy=day,
+                ccc_hits=ccc_hits,
+                reflection=preview_text,
+                llm=_preview_llm_result(),
+                saved_entry_id=saved_entry_id,
+            )
+            return
+
+        accumulated: list[str] = []
+        last_meta: LLMResult | None = None
+        for piece, meta in self.router.stream(COMPANION_SYSTEM_PROMPT, prompt, temperature=temperature):
+            accumulated.append(piece)
+            last_meta = meta
+            yield "chunk", piece
+
+        yield "done", self._finalize_reply(
+            liturgy=day,
+            ccc_hits=ccc_hits,
+            reflection="".join(accumulated).strip(),
+            llm=last_meta,
+            saved_entry_id=saved_entry_id,
+        )
+
     def stream_daily_briefing(
         self,
         *,
@@ -185,39 +230,13 @@ class CompanionService:
             offline=offline,
             ccc_k=ccc_k,
         )
-        yield "context", (day, ccc_hits)
-
-        if demo:
-            full_text = build_preview_daily_reflection(day, ccc_hits)
-            words = full_text.split(" ")
-            step = 10
-            for idx in range(0, len(words), step):
-                chunk = " ".join(words[idx : idx + step])
-                if idx + step < len(words):
-                    chunk += " "
-                yield "chunk", chunk
-            yield "done", self._finalize_reply(
-                liturgy=day,
-                ccc_hits=ccc_hits,
-                reflection=full_text,
-                llm=_preview_llm_result(),
-            )
-            return
-
-        prompt = build_daily_briefing_prompt(day, ccc_hits)
-        accumulated: list[str] = []
-        last_meta: LLMResult | None = None
-        for piece, meta in self.router.stream(COMPANION_SYSTEM_PROMPT, prompt, temperature=0.35):
-            accumulated.append(piece)
-            last_meta = meta
-            yield "chunk", piece
-
-        full_text = "".join(accumulated).strip()
-        yield "done", self._finalize_reply(
-            liturgy=day,
+        yield from self._stream_from_prompt(
+            day=day,
             ccc_hits=ccc_hits,
-            reflection=full_text,
-            llm=last_meta,
+            prompt=build_daily_briefing_prompt(day, ccc_hits),
+            preview_text=build_preview_daily_reflection(day, ccc_hits) if demo else "",
+            demo=demo,
+            temperature=0.35,
         )
 
     def personal_checkin(
@@ -311,8 +330,6 @@ class CompanionService:
 
         combined_query = f"{user_message}\n\n{day.theme_query()}"
         ccc_hits = self.ccc_index.search(combined_query, k=ccc_k)
-        yield "context", (day, ccc_hits)
-
         memory_ctx = self.journal.season_summary(season=day.season).prompt_context()
         saved_id: int | None = None
         if remember:
@@ -325,44 +342,19 @@ class CompanionService:
             )
             saved_id = entry.id
 
-        if demo:
-            full_text = build_preview_checkin_reflection(user_message, day, ccc_hits)
-            words = full_text.split(" ")
-            step = 10
-            for idx in range(0, len(words), step):
-                chunk = " ".join(words[idx : idx + step])
-                if idx + step < len(words):
-                    chunk += " "
-                yield "chunk", chunk
-            yield "done", self._finalize_reply(
-                liturgy=day,
-                ccc_hits=ccc_hits,
-                reflection=full_text,
-                llm=_preview_llm_result(),
-                saved_entry_id=saved_id,
-            )
-            return
-
-        prompt = build_checkin_prompt(
-            user_message,
-            day,
-            ccc_hits,
-            memory_context=memory_ctx,
-            history=history,
-        )
-        accumulated: list[str] = []
-        last_meta: LLMResult | None = None
-        for piece, meta in self.router.stream(COMPANION_SYSTEM_PROMPT, prompt, temperature=0.45):
-            accumulated.append(piece)
-            last_meta = meta
-            yield "chunk", piece
-
-        full_text = "".join(accumulated).strip()
-        yield "done", self._finalize_reply(
-            liturgy=day,
+        yield from self._stream_from_prompt(
+            day=day,
             ccc_hits=ccc_hits,
-            reflection=full_text,
-            llm=last_meta,
+            prompt=build_checkin_prompt(
+                user_message,
+                day,
+                ccc_hits,
+                memory_context=memory_ctx,
+                history=history,
+            ),
+            preview_text=build_preview_checkin_reflection(user_message, day, ccc_hits) if demo else "",
+            demo=demo,
+            temperature=0.45,
             saved_entry_id=saved_id,
         )
 
@@ -551,4 +543,165 @@ class CompanionService:
             ccc_hits=ccc_hits,
             reflection=result.content,
             llm=result,
+        )
+
+    def stream_evening_examen(
+        self,
+        *,
+        gratitude: str,
+        consolation: str,
+        desolation: str,
+        target_date: dt.date | None = None,
+        offline: bool = False,
+        ccc_k: int = 3,
+        demo: bool = False,
+        remember: bool = True,
+    ):
+        """Stream the 3-minute nightly Ignatian Examen via SSE."""
+        day = self.get_day(target_date, offline=offline)
+        combined_notes = " ".join(p for p in (gratitude, consolation, desolation) if p).strip()
+        if detect_distress_signal(combined_notes):
+            ccc_hits = self.ccc_index.search("human life sacred dignity despair hope", k=2)
+            yield "context", (day, ccc_hits)
+            yield "done", CompanionReply(
+                liturgy=day,
+                ccc_hits=ccc_hits,
+                reflection=PASTORAL_CRISIS_RESPONSE,
+                llm=None,
+                crisis_escalated=True,
+            )
+            return
+
+        ccc_hits = self.ccc_index.search(f"prayer examen {combined_notes}\n{day.theme_query()}", k=ccc_k)
+        memory_ctx = self.journal.season_summary(season=day.season).prompt_context()
+        saved_id: int | None = None
+        if remember and combined_notes:
+            entry = self.journal.add_entry(
+                liturgical_date=day.date,
+                season=day.season,
+                entry_type="examen",
+                user_note=gratitude,
+                consolation=consolation,
+                desolation=desolation,
+                ccc_citations=[h.citation for h in ccc_hits],
+            )
+            saved_id = entry.id
+
+        yield from self._stream_from_prompt(
+            day=day,
+            ccc_hits=ccc_hits,
+            prompt=build_examen_prompt(
+                day=day,
+                ccc_hits=ccc_hits,
+                gratitude=gratitude,
+                consolation=consolation,
+                desolation=desolation,
+                memory_context=memory_ctx,
+            ),
+            preview_text=(
+                build_preview_examen_reflection(
+                    day=day,
+                    ccc_hits=ccc_hits,
+                    gratitude=gratitude,
+                    consolation=consolation,
+                    desolation=desolation,
+                    memory_context=memory_ctx,
+                )
+                if demo
+                else ""
+            ),
+            demo=demo,
+            temperature=0.4,
+            saved_entry_id=saved_id,
+        )
+
+    def stream_confession_prep(
+        self,
+        *,
+        focus_area: str = "",
+        target_date: dt.date | None = None,
+        offline: bool = False,
+        demo: bool = False,
+    ):
+        """Stream the gentle Examination of Conscience & Confession guide via SSE."""
+        day = self.get_day(target_date, offline=offline)
+        if detect_distress_signal(focus_area):
+            ccc_hits = self.ccc_index.search("human life sacred dignity despair hope", k=2)
+            yield "context", (day, ccc_hits)
+            yield "done", CompanionReply(
+                liturgy=day,
+                ccc_hits=ccc_hits,
+                reflection=PASTORAL_CRISIS_RESPONSE,
+                llm=None,
+                crisis_escalated=True,
+            )
+            return
+
+        summary = self.journal.season_summary(season=day.season)
+        theme_words = " ".join(theme for theme, _ in summary.top_themes)
+        query = (
+            f"penance reconciliation interior repentance conscience forgiveness mercy "
+            f"{focus_area} {theme_words}"
+        )
+        ccc_hits = self.ccc_index.search(query, k=4)
+        memory_ctx = summary.prompt_context()
+
+        yield from self._stream_from_prompt(
+            day=day,
+            ccc_hits=ccc_hits,
+            prompt=build_confession_prep_prompt(
+                day=day,
+                ccc_hits=ccc_hits,
+                focus_area=focus_area,
+                memory_context=memory_ctx,
+            ),
+            preview_text=(
+                build_preview_confession_prep_reflection(
+                    day=day,
+                    ccc_hits=ccc_hits,
+                    focus_area=focus_area,
+                    memory_context=memory_ctx,
+                )
+                if demo
+                else ""
+            ),
+            demo=demo,
+            temperature=0.35,
+        )
+
+    def stream_lectio_divina(
+        self,
+        *,
+        selected_phrase: str = "",
+        target_date: dt.date | None = None,
+        offline: bool = False,
+        demo: bool = False,
+    ):
+        """Stream 4-step Lectio Divina via SSE."""
+        day = self.get_day(target_date, offline=offline)
+        query = f"contemplative prayer word of god meditation {selected_phrase}\n{day.theme_query()}"
+        ccc_hits = self.ccc_index.search(query, k=3)
+        contemplative = self.ccc_index.get_by_paragraph(2709)
+        if contemplative is not None and all(h.paragraph != 2709 for h in ccc_hits):
+            ccc_hits = [contemplative, *ccc_hits[:2]]
+
+        yield from self._stream_from_prompt(
+            day=day,
+            ccc_hits=ccc_hits,
+            prompt=build_lectio_divina_prompt(
+                day=day,
+                ccc_hits=ccc_hits,
+                selected_phrase=selected_phrase,
+            ),
+            preview_text=(
+                build_preview_lectio_divina(
+                    day=day,
+                    ccc_hits=ccc_hits,
+                    selected_phrase=selected_phrase,
+                )
+                if demo
+                else ""
+            ),
+            demo=demo,
+            temperature=0.4,
         )

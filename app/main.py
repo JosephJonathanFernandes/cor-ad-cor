@@ -133,6 +133,33 @@ def _serialize_reply(reply: CompanionReply) -> dict[str, Any]:
     }
 
 
+def _sse_streaming_response(stream_iter) -> StreamingResponse:
+    """Wrap a CompanionService stream generator in an SSE StreamingResponse."""
+
+    def event_stream():
+        try:
+            for event_name, item in stream_iter:
+                if event_name == "context":
+                    day, hits = item
+                    body = {
+                        "liturgy": day.model_dump(),
+                        "ccc_citations": _serialize_ccc_hits(hits),
+                    }
+                elif event_name == "chunk":
+                    body = {"delta": item}
+                else:
+                    body = _serialize_reply(item)
+                yield f"event: {event_name}\ndata: {json.dumps(body, ensure_ascii=False)}\n\n"
+        except AllProvidersExhaustedError as exc:
+            yield f"event: error\ndata: {json.dumps({'detail': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 def create_app(
     service_override: CompanionService | None = None,
     synthesizer_override: VoiceNoteSynthesizer | None = None,
@@ -271,31 +298,8 @@ def create_app(
         demo: bool = Query(default=False),
         service: CompanionService = Depends(get_service),
     ) -> StreamingResponse:
-        def event_stream():
-            try:
-                for event_name, payload in service.stream_daily_briefing(
-                    target_date=date,
-                    offline=offline,
-                    demo=demo,
-                ):
-                    if event_name == "context":
-                        day, hits = payload
-                        body = {
-                            "liturgy": day.model_dump(),
-                            "ccc_citations": _serialize_ccc_hits(hits),
-                        }
-                    elif event_name == "chunk":
-                        body = {"delta": payload}
-                    else:
-                        body = _serialize_reply(payload)
-                    yield f"event: {event_name}\ndata: {json.dumps(body, ensure_ascii=False)}\n\n"
-            except AllProvidersExhaustedError as exc:
-                yield f"event: error\ndata: {json.dumps({'detail': str(exc)})}\n\n"
-
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        return _sse_streaming_response(
+            service.stream_daily_briefing(target_date=date, offline=offline, demo=demo)
         )
 
     @application.post("/api/v1/checkin")
@@ -321,34 +325,15 @@ def create_app(
         payload: CheckInRequest,
         service: CompanionService = Depends(get_service),
     ) -> StreamingResponse:
-        def event_stream():
-            try:
-                for event_name, item in service.stream_personal_checkin(
-                    user_message=payload.message,
-                    target_date=payload.date,
-                    offline=payload.offline,
-                    demo=payload.demo,
-                    remember=payload.remember,
-                    history=[turn.model_dump() for turn in payload.history],
-                ):
-                    if event_name == "context":
-                        day, hits = item
-                        body = {
-                            "liturgy": day.model_dump(),
-                            "ccc_citations": _serialize_ccc_hits(hits),
-                        }
-                    elif event_name == "chunk":
-                        body = {"delta": item}
-                    else:
-                        body = _serialize_reply(item)
-                    yield f"event: {event_name}\ndata: {json.dumps(body, ensure_ascii=False)}\n\n"
-            except AllProvidersExhaustedError as exc:
-                yield f"event: error\ndata: {json.dumps({'detail': str(exc)})}\n\n"
-
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        return _sse_streaming_response(
+            service.stream_personal_checkin(
+                user_message=payload.message,
+                target_date=payload.date,
+                offline=payload.offline,
+                demo=payload.demo,
+                remember=payload.remember,
+                history=[turn.model_dump() for turn in payload.history],
+            )
         )
 
     @application.post("/api/v1/examen")
@@ -377,6 +362,30 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return _serialize_reply(reply)
 
+    @application.post("/api/v1/examen/stream")
+    def stream_examen(
+        payload: ExamenRequest,
+        service: CompanionService = Depends(get_service),
+    ) -> StreamingResponse:
+        if not any(
+            part.strip() for part in (payload.gratitude, payload.consolation, payload.desolation)
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Provide at least one Examen reflection note (gratitude, consolation, or desolation).",
+            )
+        return _sse_streaming_response(
+            service.stream_evening_examen(
+                gratitude=payload.gratitude,
+                consolation=payload.consolation,
+                desolation=payload.desolation,
+                target_date=payload.date,
+                offline=payload.offline,
+                demo=payload.demo,
+                remember=payload.remember,
+            )
+        )
+
     @application.post("/api/v1/confession-prep")
     def post_confession_prep(
         payload: ConfessionPrepRequest,
@@ -392,6 +401,20 @@ def create_app(
         except AllProvidersExhaustedError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return _serialize_reply(reply)
+
+    @application.post("/api/v1/confession-prep/stream")
+    def stream_confession_prep(
+        payload: ConfessionPrepRequest,
+        service: CompanionService = Depends(get_service),
+    ) -> StreamingResponse:
+        return _sse_streaming_response(
+            service.stream_confession_prep(
+                focus_area=payload.focus_area,
+                target_date=payload.date,
+                offline=payload.offline,
+                demo=payload.demo,
+            )
+        )
 
     @application.get("/api/v1/memory")
     def get_season_memory(
@@ -508,6 +531,20 @@ def create_app(
         except AllProvidersExhaustedError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return _serialize_reply(reply)
+
+    @application.post("/api/v1/lectio/stream")
+    def stream_lectio(
+        payload: LectioRequest,
+        service: CompanionService = Depends(get_service),
+    ) -> StreamingResponse:
+        return _sse_streaming_response(
+            service.stream_lectio_divina(
+                selected_phrase=payload.selected_phrase,
+                target_date=payload.date,
+                offline=payload.offline,
+                demo=payload.demo,
+            )
+        )
 
     @application.get("/api/v1/ccc/search")
     def search_ccc(

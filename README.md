@@ -68,9 +68,8 @@ Copy-Item .env.example .env
 # Download, normalize, and FAISS-index all 2,865 Catechism paragraphs (CCC §1–§2865)
 .venv\Scripts\python scripts\fetch_ccc_full.py
 
-# Start the Web App & API server
-.venv\Scripts\uvicorn app.main:app --reload
-# Open http://127.0.0.1:8000 in your browser
+# Start the Web App & API server (auto-selects a free port starting at 8010)
+.venv\Scripts\python run.py
 
 # Run the test suite or live liturgical smoke test
 .venv\Scripts\pytest -v

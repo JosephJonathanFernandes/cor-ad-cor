@@ -266,3 +266,28 @@ def test_exact_ccc_endpoint_multiturn_checkin_and_rhythm_stats(tmp_path: Path) -
         assert "event: context" in stream_body
         assert "event: chunk" in stream_body
         assert "event: done" in stream_body
+
+        # SSE streams for Examen, Confession Prep, and Lectio Divina
+        for url, payload in (
+            (
+                "/api/v1/examen/stream",
+                {"gratitude": "Morning peace", "date": "2026-11-26", "offline": True, "demo": True},
+            ),
+            (
+                "/api/v1/confession-prep/stream",
+                {"focus_area": "Impatience", "date": "2026-11-26", "offline": True, "demo": True},
+            ),
+            (
+                "/api/v1/lectio/stream",
+                {"selected_phrase": "Follow me", "date": "2026-11-26", "offline": True, "demo": True},
+            ),
+        ):
+            with client.stream("POST", url, json=payload) as s_resp:
+                assert s_resp.status_code == 200
+                text_out = "".join(s_resp.iter_text())
+            assert "event: done" in text_out
+
+    import run as launcher
+
+    port = launcher.find_free_port("127.0.0.1", preferred=18910)
+    assert port >= 18910

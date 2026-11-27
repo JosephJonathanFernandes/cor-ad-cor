@@ -576,6 +576,70 @@ async function loadHourPrayer(season) {
   }
 }
 
+async function consumePostSseStream({
+  url,
+  payload,
+  bodyEl,
+  telemetryEl,
+  pillEl,
+  targetKey,
+  onDoneExtra,
+}) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok || !res.body) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || "Could not complete reflection stream.");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let streamedText = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() || "";
+
+    for (const block of blocks) {
+      const eventMatch = block.match(/^event:\s*(\S+)/m);
+      const dataMatch = block.match(/^data:\s*(.+)$/m);
+      if (!eventMatch || !dataMatch) continue;
+      const evtName = eventMatch[1];
+      const evtData = JSON.parse(dataMatch[1]);
+
+      if (evtName === "context") {
+        renderCccList(evtData.ccc_citations);
+      } else if (evtName === "chunk") {
+        streamedText += evtData.delta || "";
+        bodyEl.innerHTML = renderReflectionHtml(streamedText);
+      } else if (evtName === "done") {
+        renderCccList(evtData.ccc_citations);
+        if (targetKey) {
+          state.reflections[targetKey] = evtData.reflection;
+        }
+        telemetryEl.hidden = false;
+        pillEl.textContent = formatProviderBadge(evtData.llm, evtData.citation_verification);
+        const rendered = renderReflectionHtml(evtData.reflection);
+        bodyEl.innerHTML = evtData.crisis_escalated
+          ? `<div class="crisis-alert-card">${rendered}</div>`
+          : rendered;
+        if (onDoneExtra) {
+          await onDoneExtra(evtData);
+        }
+      } else if (evtName === "error") {
+        throw new Error(evtData.detail || "Streaming error.");
+      }
+    }
+  }
+}
+
 async function submitCheckin({ demo = false } = {}) {
   const message = els.checkinInput.value.trim();
   if (message.length < 2) {
@@ -587,76 +651,33 @@ async function submitCheckin({ demo = false } = {}) {
   els.btnPreviewCheckin.disabled = true;
   els.checkinReflectionBody.innerHTML = `<p class="muted-placeholder">Sitting prayerfully with what you shared and today's readings...</p>`;
 
-  const payload = {
-    message,
-    date: state.date,
-    offline: state.offline,
-    demo: useDemo,
-    remember: Boolean(els.checkinRemember && els.checkinRemember.checked),
-    history: state.checkinHistory.slice(-6),
-  };
-
   try {
-    const res = await fetch("/api/v1/checkin/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok || !res.body) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.detail || "Could not complete check-in.");
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let streamedText = "";
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const blocks = buffer.split("\n\n");
-      buffer = blocks.pop() || "";
-
-      for (const block of blocks) {
-        const eventMatch = block.match(/^event:\s*(\S+)/m);
-        const dataMatch = block.match(/^data:\s*(.+)$/m);
-        if (!eventMatch || !dataMatch) continue;
-        const evtName = eventMatch[1];
-        const evtData = JSON.parse(dataMatch[1]);
-
-        if (evtName === "context") {
-          renderCccList(evtData.ccc_citations);
-        } else if (evtName === "chunk") {
-          streamedText += evtData.delta || "";
-          els.checkinReflectionBody.innerHTML = renderReflectionHtml(streamedText);
-        } else if (evtName === "done") {
-          renderCccList(evtData.ccc_citations);
-          state.reflections.checkin = evtData.reflection;
-          els.checkinTelemetry.hidden = false;
-          els.checkinProviderPill.textContent = formatProviderBadge(
-            evtData.llm,
-            evtData.citation_verification
-          );
-          const rendered = renderReflectionHtml(evtData.reflection);
-          if (evtData.crisis_escalated) {
-            els.checkinReflectionBody.innerHTML = `<div class="crisis-alert-card">${rendered}</div>`;
-          } else {
-            state.checkinHistory.push({ role: "user", content: message });
-            state.checkinHistory.push({ role: "assistant", content: evtData.reflection });
-            if (els.btnResetCheckin) els.btnResetCheckin.hidden = false;
-            els.checkinInput.value = "";
-            els.checkinInput.placeholder =
-              "Reply to the companion's question or share what stirred in you...";
-            els.checkinReflectionBody.innerHTML = rendered;
-          }
-          await loadSeasonMemory();
-        } else if (evtName === "error") {
-          throw new Error(evtData.detail || "Streaming error.");
+    await consumePostSseStream({
+      url: "/api/v1/checkin/stream",
+      payload: {
+        message,
+        date: state.date,
+        offline: state.offline,
+        demo: useDemo,
+        remember: Boolean(els.checkinRemember && els.checkinRemember.checked),
+        history: state.checkinHistory.slice(-6),
+      },
+      bodyEl: els.checkinReflectionBody,
+      telemetryEl: els.checkinTelemetry,
+      pillEl: els.checkinProviderPill,
+      targetKey: "checkin",
+      onDoneExtra: async (evtData) => {
+        if (!evtData.crisis_escalated) {
+          state.checkinHistory.push({ role: "user", content: message });
+          state.checkinHistory.push({ role: "assistant", content: evtData.reflection });
+          if (els.btnResetCheckin) els.btnResetCheckin.hidden = false;
+          els.checkinInput.value = "";
+          els.checkinInput.placeholder =
+            "Reply to the companion's question or share what stirred in you...";
         }
-      }
-    }
+        await loadSeasonMemory();
+      },
+    });
   } catch (err) {
     els.checkinReflectionBody.innerHTML = `<div class="empty-sanctuary-state"><p>${escapeHtml(err.message)}</p></div>`;
   } finally {
@@ -681,10 +702,9 @@ async function submitExamen({ demo = false } = {}) {
   els.examenReflectionBody.innerHTML = `<p class="muted-placeholder">Gathering the day in stillness with today's Word...</p>`;
 
   try {
-    const res = await fetch("/api/v1/examen", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    await consumePostSseStream({
+      url: "/api/v1/examen/stream",
+      payload: {
         gratitude,
         consolation,
         desolation,
@@ -692,21 +712,15 @@ async function submitExamen({ demo = false } = {}) {
         offline: state.offline,
         demo: useDemo,
         remember: Boolean(els.examenRemember && els.examenRemember.checked),
-      }),
+      },
+      bodyEl: els.examenReflectionBody,
+      telemetryEl: els.examenTelemetry,
+      pillEl: els.examenProviderPill,
+      targetKey: "examen",
+      onDoneExtra: async () => {
+        await loadSeasonMemory();
+      },
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.detail || "Could not generate evening Examen.");
-    }
-    renderCccList(data.ccc_citations);
-    state.reflections.examen = data.reflection;
-    els.examenTelemetry.hidden = false;
-    els.examenProviderPill.textContent = formatProviderBadge(data.llm, data.citation_verification);
-    const rendered = renderReflectionHtml(data.reflection);
-    els.examenReflectionBody.innerHTML = data.crisis_escalated
-      ? `<div class="crisis-alert-card">${rendered}</div>`
-      : rendered;
-    await loadSeasonMemory();
   } catch (err) {
     els.examenReflectionBody.innerHTML = `<div class="empty-sanctuary-state"><p>${escapeHtml(err.message)}</p></div>`;
   } finally {
@@ -769,27 +783,19 @@ async function submitConfessionPrep({ demo = false } = {}) {
   els.confessionReflectionBody.innerHTML = `<p class="muted-placeholder">Preparing a gentle Examination of Conscience from your season patterns and the Catechism...</p>`;
 
   try {
-    const res = await fetch("/api/v1/confession-prep", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    await consumePostSseStream({
+      url: "/api/v1/confession-prep/stream",
+      payload: {
         focus_area,
         date: state.date,
         offline: state.offline,
         demo: useDemo,
-      }),
+      },
+      bodyEl: els.confessionReflectionBody,
+      telemetryEl: els.confessionTelemetry,
+      pillEl: els.confessionProviderPill,
+      targetKey: null,
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.detail || "Could not generate Confession preparation.");
-    }
-    renderCccList(data.ccc_citations);
-    els.confessionTelemetry.hidden = false;
-    els.confessionProviderPill.textContent = formatProviderBadge(data.llm, data.citation_verification);
-    const rendered = renderReflectionHtml(data.reflection);
-    els.confessionReflectionBody.innerHTML = data.crisis_escalated
-      ? `<div class="crisis-alert-card">${rendered}</div>`
-      : rendered;
   } catch (err) {
     els.confessionReflectionBody.innerHTML = `<div class="empty-sanctuary-state"><p>${escapeHtml(err.message)}</p></div>`;
   } finally {
@@ -826,25 +832,19 @@ async function submitLectioDivina({ demo = false } = {}) {
   els.lectioReflectionBody.innerHTML = `<p class="muted-placeholder">Preparing today's four-step Lectio Divina...</p>`;
 
   try {
-    const res = await fetch("/api/v1/lectio", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    await consumePostSseStream({
+      url: "/api/v1/lectio/stream",
+      payload: {
         selected_phrase,
         date: state.date,
         offline: state.offline,
         demo: useDemo,
-      }),
+      },
+      bodyEl: els.lectioReflectionBody,
+      telemetryEl: els.lectioTelemetry,
+      pillEl: els.lectioProviderPill,
+      targetKey: "lectio",
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.detail || "Could not prepare Lectio Divina.");
-    }
-    renderCccList(data.ccc_citations);
-    state.reflections.lectio = data.reflection;
-    els.lectioTelemetry.hidden = false;
-    els.lectioProviderPill.textContent = formatProviderBadge(data.llm, data.citation_verification);
-    els.lectioReflectionBody.innerHTML = renderReflectionHtml(data.reflection);
   } catch (err) {
     els.lectioReflectionBody.innerHTML = `<div class="empty-sanctuary-state"><p>${escapeHtml(err.message)}</p></div>`;
   } finally {
